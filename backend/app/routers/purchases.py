@@ -1,0 +1,125 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.models.purchase import Purchase, PurchaseItem
+from app.models.product import Product
+from app.models.packaging import ProductPackaging
+from app.models.supplier import Supplier
+from app.schemas.purchase import PurchaseCreate
+from app.services.inventory_service import create_purchase_movement
+
+
+router = APIRouter(
+    prefix="/purchases",
+    tags=["Purchases"]
+)
+
+
+@router.post("/", status_code=201)
+def create_purchase(
+    data: PurchaseCreate,
+    db: Session = Depends(get_db)
+):
+    # Check supplier
+    supplier = db.get(Supplier, data.supplier_id)
+
+    if not supplier:
+        raise HTTPException(
+            status_code=404,
+            detail="Supplier not found"
+        )
+
+    # Check supplier invoice uniqueness
+    existing_purchase = db.execute(
+        select(Purchase).where(
+            Purchase.supplier_id == data.supplier_id,
+            Purchase.supplier_invoice_no == data.supplier_invoice_no
+        )
+    ).scalar_one_or_none()
+
+    if existing_purchase:
+        raise HTTPException(
+            status_code=409,
+            detail="Supplier invoice already exists"
+        )
+
+    purchase = Purchase(
+        supplier_id=data.supplier_id,
+        purchase_date=data.purchase_date,
+        supplier_invoice_no=data.supplier_invoice_no,
+        subtotal=data.subtotal,
+        discount=data.discount,
+        tax=data.tax,
+        total_amount=data.total_amount,
+        status=data.status
+    )
+
+    db.add(purchase)
+    db.flush()
+
+    for item in data.items:
+
+        # Check product
+        product = db.get(Product, item.product_id)
+
+        if not product:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Product {item.product_id} not found"
+            )
+
+        # Check packaging belongs to product
+        packaging = db.execute(
+            select(ProductPackaging).where(
+                ProductPackaging.packaging_id == item.packaging_id,
+                ProductPackaging.product_id == item.product_id
+            )
+        ).scalar_one_or_none()
+
+        if not packaging:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Packaging {item.packaging_id} "
+                    f"does not belong to product {item.product_id}"
+                )
+            )
+
+        if item.received_quantity > item.quantity:
+            raise HTTPException(
+                status_code=400,
+                detail="Received quantity cannot exceed purchase quantity"
+            )
+
+        purchase_item = PurchaseItem(
+            purchase_id=purchase.purchase_id,
+            product_id=item.product_id,
+            packaging_id=item.packaging_id,
+            quantity=item.quantity,
+            received_quantity=item.received_quantity,
+            unit_price=item.unit_price,
+            discount=item.discount,
+            tax=item.tax,
+            line_total=item.line_total
+        )
+    db.add(purchase_item)
+    db.flush()
+
+    if purchase.status == "RECEIVED":
+        create_purchase_movement(
+            db,
+            purchase_item
+        )
+
+    db.commit()
+    db.refresh(purchase)
+
+    return {
+        "message": "Purchase created successfully",
+        "purchase_id": purchase.purchase_id,
+        "supplier_id": purchase.supplier_id,
+        "supplier_invoice_no": purchase.supplier_invoice_no,
+        "status": purchase.status
+    }

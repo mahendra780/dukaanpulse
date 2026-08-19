@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.invoice import Invoice, InvoiceItem
@@ -113,3 +113,61 @@ def create_invoice(
         "invoice_number": invoice.invoice_number,
         "status": invoice.status
     }
+
+@router.get("/")
+def get_invoices(
+    db: Session = Depends(get_db)
+):
+    invoices = db.execute(
+        select(Invoice)
+        .options(
+            joinedload(Invoice.order),
+            joinedload(Invoice.items).joinedload(
+                InvoiceItem.product
+            ),
+            joinedload(Invoice.items).joinedload(
+                InvoiceItem.packaging
+            )
+        )
+        .order_by(Invoice.invoice_id.desc())
+    ).unique().scalars().all()
+
+    result = []
+
+    for invoice in invoices:
+        result.append({
+            "invoice_id": invoice.invoice_id,
+            "order_id": invoice.order_id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date,
+            "subtotal": invoice.subtotal,
+            "discount": invoice.discount,
+            "tax": invoice.tax,
+            "total_amount": invoice.total_amount,
+            "status": invoice.status,
+            "items": [
+                {
+                    "invoice_item_id": item.invoice_item_id,
+                    "product_id": item.product_id,
+                    "product_name": (
+                        item.product.product_name
+                        if item.product
+                        else None
+                    ),
+                    "packaging_id": item.packaging_id,
+                    "unit_name": (
+                        item.packaging.unit_name
+                        if item.packaging
+                        else None
+                    ),
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "discount": item.discount,
+                    "tax": item.tax,
+                    "line_total": item.line_total
+                }
+                for item in invoice.items
+            ]
+        })
+
+    return result

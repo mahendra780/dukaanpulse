@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.invoice import Invoice
@@ -186,3 +186,60 @@ def receive_return(
         "return_id": return_record.return_id,
         "status": return_record.status
     }
+
+@router.get("/")
+def get_returns(
+    db: Session = Depends(get_db)
+):
+    returns = db.execute(
+        select(Return)
+        .options(
+            joinedload(Return.invoice),
+            joinedload(Return.items).joinedload(
+                ReturnItem.product
+            ),
+            joinedload(Return.items).joinedload(
+                ReturnItem.packaging
+            )
+        )
+        .order_by(Return.return_id.desc())
+    ).unique().scalars().all()
+
+    result = []
+
+    for return_record in returns:
+        result.append({
+            "return_id": return_record.return_id,
+            "invoice_id": return_record.invoice_id,
+            "invoice_number": (
+                return_record.invoice.invoice_number
+                if return_record.invoice
+                else None
+            ),
+            "return_date": return_record.return_date,
+            "reason": return_record.reason,
+            "status": return_record.status,
+            "notes": return_record.notes,
+            "items": [
+                {
+                    "return_item_id": item.return_item_id,
+                    "product_id": item.product_id,
+                    "product_name": (
+                        item.product.product_name
+                        if item.product
+                        else None
+                    ),
+                    "packaging_id": item.packaging_id,
+                    "unit_name": (
+                        item.packaging.unit_name
+                        if item.packaging
+                        else None
+                    ),
+                    "quantity": item.quantity,
+                    "condition": item.condition
+                }
+                for item in return_record.items
+            ]
+        })
+
+    return result

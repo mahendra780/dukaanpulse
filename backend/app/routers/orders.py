@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.customer import Customer
@@ -86,3 +86,57 @@ def create_order(
         "customer_id": order.customer_id,
         "status": order.status
     }
+@router.get("/")
+def get_orders(
+    db: Session = Depends(get_db)
+):
+    orders = db.execute(
+        select(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.items).joinedload(
+                OrderItem.product
+            ),
+            joinedload(Order.items).joinedload(
+                OrderItem.packaging
+            )
+        )
+        .order_by(Order.order_id.desc())
+    ).unique().scalars().all()
+
+    result = []
+
+    for order in orders:
+        result.append({
+            "order_id": order.order_id,
+            "customer_id": order.customer_id,
+            "customer_name": (
+                order.customer.customer_name
+                if order.customer
+                else None
+            ),
+            "order_date": order.order_date,
+            "status": order.status,
+            "notes": order.notes,
+            "items": [
+                {
+                    "order_item_id": item.order_item_id,
+                    "product_id": item.product_id,
+                    "product_name": (
+                        item.product.product_name
+                        if item.product
+                        else None
+                    ),
+                    "packaging_id": item.packaging_id,
+                    "unit_name": (
+                        item.packaging.unit_name
+                        if item.packaging
+                        else None
+                    ),
+                    "quantity": item.quantity
+                }
+                for item in order.items
+            ]
+        })
+
+    return result

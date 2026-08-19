@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.purchase import Purchase, PurchaseItem
@@ -123,3 +123,65 @@ def create_purchase(
         "supplier_invoice_no": purchase.supplier_invoice_no,
         "status": purchase.status
     }
+
+@router.get("/")
+def get_purchases(
+    db: Session = Depends(get_db)
+):
+    purchases = db.execute(
+        select(Purchase)
+        .options(
+            joinedload(Purchase.supplier),
+            joinedload(Purchase.items)
+            .joinedload(PurchaseItem.product),
+            joinedload(Purchase.items)
+            .joinedload(PurchaseItem.packaging)
+        )
+        .order_by(Purchase.purchase_id.desc())
+    ).unique().scalars().all()
+
+    result = []
+
+    for purchase in purchases:
+        result.append({
+            "purchase_id": purchase.purchase_id,
+            "supplier_id": purchase.supplier_id,
+            "supplier_name": (
+                purchase.supplier.supplier_name
+                if purchase.supplier
+                else None
+            ),
+            "purchase_date": purchase.purchase_date,
+            "supplier_invoice_no": purchase.supplier_invoice_no,
+            "subtotal": purchase.subtotal,
+            "discount": purchase.discount,
+            "tax": purchase.tax,
+            "total_amount": purchase.total_amount,
+            "status": purchase.status,
+            "items": [
+                {
+                    "purchase_item_id": item.purchase_item_id,
+                    "product_id": item.product_id,
+                    "product_name": (
+                        item.product.product_name
+                        if item.product
+                        else None
+                    ),
+                    "packaging_id": item.packaging_id,
+                    "unit_name": (
+                        item.packaging.unit_name
+                        if item.packaging
+                        else None
+                    ),
+                    "quantity": item.quantity,
+                    "received_quantity": item.received_quantity,
+                    "unit_price": item.unit_price,
+                    "discount": item.discount,
+                    "tax": item.tax,
+                    "line_total": item.line_total
+                }
+                for item in purchase.items
+            ]
+        })
+
+    return result

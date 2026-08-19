@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.invoice import Invoice
@@ -90,3 +90,34 @@ def create_payment(
         "paid_amount": payment.amount,
         "invoice_status": invoice.status
     }
+@router.get("/")
+def get_payments(
+    db: Session = Depends(get_db)
+):
+    payments = db.execute(
+        select(Payment)
+        .options(
+            joinedload(Payment.invoice)
+        )
+        .order_by(Payment.payment_id.desc())
+    ).unique().scalars().all()
+
+    result = []
+
+    for payment in payments:
+        result.append({
+            "payment_id": payment.payment_id,
+            "invoice_id": payment.invoice_id,
+            "invoice_number": (
+                payment.invoice.invoice_number
+                if payment.invoice
+                else None
+            ),
+            "payment_date": payment.payment_date,
+            "amount": payment.amount,
+            "payment_method": payment.payment_method,
+            "reference_number": payment.reference_number,
+            "notes": payment.notes
+        })
+
+    return result

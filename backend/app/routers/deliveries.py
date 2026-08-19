@@ -81,3 +81,35 @@ def create_delivery(
         "invoice_id": delivery.invoice_id,
         "status": delivery.status
     }
+@router.get("/")
+def get_deliveries(
+    db: Session = Depends(get_db)
+):
+    deliveries = db.execute(
+        select(Delivery)
+        .options(
+            joinedload(Delivery.invoice)
+        )
+        .order_by(Delivery.delivery_id.desc())
+    ).unique().scalars().all()
+
+    result = []
+
+    for delivery in deliveries:
+        result.append({
+            "delivery_id": delivery.delivery_id,
+            "invoice_id": delivery.invoice_id,
+            "invoice_number": (
+                delivery.invoice.invoice_number
+                if delivery.invoice
+                else None
+            ),
+            "delivery_date": delivery.delivery_date,
+            "status": delivery.status,
+            "delivery_address": delivery.delivery_address,
+            "vehicle_number": delivery.vehicle_number,
+            "driver_name": delivery.driver_name,
+            "notes": delivery.notes
+        })
+
+    return result

@@ -140,3 +140,60 @@ def get_orders(
         })
 
     return result
+
+@router.get("/{order_id}")
+def get_order(
+    order_id: int,
+    db: Session = Depends(get_db)
+):
+    order = db.execute(
+        select(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.items).joinedload(
+                OrderItem.product
+            ),
+            joinedload(Order.items).joinedload(
+                OrderItem.packaging
+            )
+        )
+        .where(Order.order_id == order_id)
+    ).unique().scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Order {order_id} not found"
+        )
+
+    return {
+        "order_id": order.order_id,
+        "customer_id": order.customer_id,
+        "customer_name": (
+            order.customer.customer_name
+            if order.customer
+            else None
+        ),
+        "order_date": order.order_date,
+        "status": order.status,
+        "notes": order.notes,
+        "items": [
+            {
+                "order_item_id": item.order_item_id,
+                "product_id": item.product_id,
+                "product_name": (
+                    item.product.product_name
+                    if item.product
+                    else None
+                ),
+                "packaging_id": item.packaging_id,
+                "unit_name": (
+                    item.packaging.unit_name
+                    if item.packaging
+                    else None
+                ),
+                "quantity": item.quantity
+            }
+            for item in order.items
+        ]
+    }

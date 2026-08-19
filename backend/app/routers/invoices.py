@@ -171,3 +171,103 @@ def get_invoices(
         })
 
     return result
+@router.get("/{invoice_id}")
+def get_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db)
+):
+    invoice = db.execute(
+        select(Invoice)
+        .options(
+            joinedload(Invoice.order),
+            joinedload(Invoice.items).joinedload(
+                InvoiceItem.product
+            ),
+            joinedload(Invoice.items).joinedload(
+                InvoiceItem.packaging
+            ),
+            joinedload(Invoice.payments),
+            joinedload(Invoice.delivery),
+            joinedload(Invoice.returns)
+        )
+        .where(Invoice.invoice_id == invoice_id)
+    ).unique().scalar_one_or_none()
+
+    if not invoice:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Invoice {invoice_id} not found"
+        )
+
+    return {
+        "invoice_id": invoice.invoice_id,
+        "order_id": invoice.order_id,
+        "invoice_number": invoice.invoice_number,
+        "invoice_date": invoice.invoice_date,
+        "subtotal": invoice.subtotal,
+        "discount": invoice.discount,
+        "tax": invoice.tax,
+        "total_amount": invoice.total_amount,
+        "status": invoice.status,
+
+        "items": [
+            {
+                "invoice_item_id": item.invoice_item_id,
+                "product_id": item.product_id,
+                "product_name": (
+                    item.product.product_name
+                    if item.product
+                    else None
+                ),
+                "packaging_id": item.packaging_id,
+                "unit_name": (
+                    item.packaging.unit_name
+                    if item.packaging
+                    else None
+                ),
+                "quantity": item.quantity,
+                "unit_price": item.unit_price,
+                "discount": item.discount,
+                "tax": item.tax,
+                "line_total": item.line_total
+            }
+            for item in invoice.items
+        ],
+
+        "payments": [
+            {
+                "payment_id": payment.payment_id,
+                "payment_date": payment.payment_date,
+                "amount": payment.amount,
+                "payment_method": payment.payment_method,
+                "reference_number": payment.reference_number,
+                "notes": payment.notes
+            }
+            for payment in invoice.payments
+        ],
+
+        "delivery": (
+            {
+                "delivery_id": invoice.delivery.delivery_id,
+                "delivery_date": invoice.delivery.delivery_date,
+                "status": invoice.delivery.status,
+                "delivery_address": invoice.delivery.delivery_address,
+                "vehicle_number": invoice.delivery.vehicle_number,
+                "driver_name": invoice.delivery.driver_name,
+                "notes": invoice.delivery.notes
+            }
+            if invoice.delivery
+            else None
+        ),
+
+        "returns": [
+            {
+                "return_id": return_record.return_id,
+                "return_date": return_record.return_date,
+                "reason": return_record.reason,
+                "status": return_record.status,
+                "notes": return_record.notes
+            }
+            for return_record in invoice.returns
+        ]
+    }

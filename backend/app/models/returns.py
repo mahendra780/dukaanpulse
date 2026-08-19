@@ -122,10 +122,12 @@ class ReturnItem(Base):
 
     product = relationship(
         "Product",
-        back_populates="return_items"
+        back_populates="return_items",
+        overlaps="return_items,packaging"
     )
 
     packaging = relationship(
         "ProductPackaging",
-        back_populates="return_items"
+        back_populates="return_items",
+        overlaps="product,return_items"
     )

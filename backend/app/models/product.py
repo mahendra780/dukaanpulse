@@ -73,5 +73,6 @@ class Product(Base):
     )
     return_items = relationship(
     "ReturnItem",
-    back_populates="product"
+    back_populates="product",
+    overlaps="packaging,return_items"
     )

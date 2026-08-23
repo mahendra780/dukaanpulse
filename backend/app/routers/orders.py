@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,Body
 from sqlalchemy import select
 from sqlalchemy.orm import Session,joinedload
+
 
 from app.db.database import get_db
 from app.models.customer import Customer
@@ -196,4 +197,75 @@ def get_order(
             }
             for item in order.items
         ]
+    }
+
+@router.patch("/{order_id}/status")
+def update_order_status(
+    order_id: int,
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    order = db.get(Order, order_id)
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Order {order_id} not found"
+        )
+
+    # Check status in request
+    new_status = data.get("status")
+
+    allowed_status = [
+        "PENDING",
+        "CONFIRMED",
+        "COMPLETED",
+        "CANCELLED"
+    ]
+
+    if new_status not in allowed_status:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Status must be PENDING, CONFIRMED, "
+                "COMPLETED or CANCELLED"
+            )
+        )
+
+    current_status = order.status
+
+    # Prevent changing completed/cancelled orders
+    if current_status in ["COMPLETED", "CANCELLED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Order cannot be updated from status "
+                f"{current_status}"
+            )
+        )
+
+    # Allowed business transitions
+    valid_transitions = {
+        "PENDING": ["CONFIRMED", "CANCELLED"],
+        "CONFIRMED": ["COMPLETED", "CANCELLED"]
+    }
+
+    if new_status not in valid_transitions[current_status]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid status transition: "
+                f"{current_status} → {new_status}"
+            )
+        )
+
+    order.status = new_status
+
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "message": "Order status updated successfully",
+        "order_id": order.order_id,
+        "status": order.status
     }

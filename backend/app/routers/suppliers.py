@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.supplier import Supplier
-from app.schemas.supplier import SupplierCreate, SupplierResponse
+from app.schemas.supplier import SupplierCreate,SupplierUpdate ,SupplierResponse
 
 
 router = APIRouter(
@@ -45,3 +45,32 @@ def create_supplier(
     db.refresh(supplier)
 
     return supplier
+@router.patch("/{supplier_id}")
+def update_supplier(
+    supplier_id: int,
+    data: SupplierUpdate,
+    db: Session = Depends(get_db)
+):
+    supplier = db.get(Supplier, supplier_id)
+
+    if not supplier:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Supplier {supplier_id} not found"
+        )
+
+    # Update only provided fields
+    update_data = data.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+        setattr(supplier, field, value)
+
+    db.commit()
+    db.refresh(supplier)
+
+    return {
+        "message": "Supplier updated successfully",
+        "supplier_id": supplier.supplier_id,
+        "supplier_name": supplier.supplier_name,
+        "status": supplier.status
+    }

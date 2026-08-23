@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.customer import Customer
-from app.schemas.customer import CustomerCreate, CustomerResponse
+from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
 
 
 router = APIRouter(
@@ -83,4 +83,33 @@ def get_customer(
             }
             for order in customer.orders
         ]
+    }
+@router.patch("/{customer_id}")
+def update_customer(
+    customer_id: int,
+    data: CustomerUpdate,
+    db: Session = Depends(get_db)
+):
+    customer = db.get(Customer, customer_id)
+
+    if not customer:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Customer {customer_id} not found"
+        )
+
+    # Only update fields sent by client
+    update_data = data.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+        setattr(customer, field, value)
+
+    db.commit()
+    db.refresh(customer)
+
+    return {
+        "message": "Customer updated successfully",
+        "customer_id": customer.customer_id,
+        "customer_name": customer.customer_name,
+        "status": customer.status
     }

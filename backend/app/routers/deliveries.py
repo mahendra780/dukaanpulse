@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException,Body
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -113,3 +113,86 @@ def get_deliveries(
         })
 
     return result
+
+@router.patch("/{delivery_id}/status")
+def update_delivery_status(
+    delivery_id: int,
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    delivery = db.execute(
+        select(Delivery)
+        .options(
+            joinedload(Delivery.invoice)
+            .joinedload(Invoice.items)
+        )
+        .where(Delivery.delivery_id == delivery_id)
+    ).unique().scalar_one_or_none()
+
+    if not delivery:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Delivery {delivery_id} not found"
+        )
+
+    new_status = data.get("status")
+
+    allowed_status = [
+        "PENDING",
+        "DISPATCHED",
+        "DELIVERED",
+        "CANCELLED"
+    ]
+
+    if new_status not in allowed_status:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Status must be PENDING, DISPATCHED, "
+                "DELIVERED or CANCELLED"
+            )
+        )
+
+    current_status = delivery.status
+
+    if current_status in ["DELIVERED", "CANCELLED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Delivery cannot be updated from status "
+                f"{current_status}"
+            )
+        )
+
+    valid_transitions = {
+        "PENDING": ["DISPATCHED", "CANCELLED"],
+        "DISPATCHED": ["DELIVERED", "CANCELLED"]
+    }
+
+    if new_status not in valid_transitions[current_status]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid status transition: "
+                f"{current_status} → {new_status}"
+            )
+        )
+
+    delivery.status = new_status
+
+    # Stock decreases only after successful delivery
+    if new_status == "DELIVERED":
+        for invoice_item in delivery.invoice.items:
+            create_sale_movement(
+                db,
+                invoice_item
+            )
+
+    db.commit()
+    db.refresh(delivery)
+
+    return {
+        "message": "Delivery status updated successfully",
+        "delivery_id": delivery.delivery_id,
+        "status": delivery.status
+    }

@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select, func, extract
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -87,3 +87,48 @@ def get_dashboard_summary(
             current_inventory_items
         )
     )
+@router.get("/sales")
+def get_sales_dashboard(
+    year: int = Query(..., description="Year (Example: 2026)"),
+    db: Session = Depends(get_db)
+):
+    sales = db.execute(
+        select(
+            extract("month", Invoice.invoice_date).label("month"),
+            func.coalesce(
+                func.sum(Invoice.total_amount),
+                0
+            ).label("sales")
+        )
+        .where(
+            extract("year", Invoice.invoice_date) == year
+        )
+        .group_by(
+            extract("month", Invoice.invoice_date)
+        )
+        .order_by(
+            extract("month", Invoice.invoice_date)
+        )
+    ).all()
+
+    month_names = {
+        1: "Jan", 2: "Feb", 3: "Mar",
+        4: "Apr", 5: "May", 6: "Jun",
+        7: "Jul", 8: "Aug", 9: "Sep",
+        10: "Oct", 11: "Nov", 12: "Dec"
+    }
+
+    result = []
+
+    sales_map = {
+        int(row.month): float(row.sales)
+        for row in sales
+    }
+
+    for month in range(1, 13):
+        result.append({
+            "month": month_names[month],
+            "sales": sales_map.get(month, 0.0)
+        })
+
+    return result

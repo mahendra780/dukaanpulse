@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, extract
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func, extract,case
+from sqlalchemy.orm import Session, aliased
 from datetime import date
 from app.db.database import get_db
 
@@ -8,9 +8,10 @@ from app.models.product import Product
 from app.models.customer import Customer
 from app.models.supplier import Supplier
 from app.models.order import Order
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceItem
 from app.models.purchase import Purchase
 from app.models.inventory import InventoryMovement
+from app.models.packaging import ProductPackaging
 
 from app.schemas.dashboard import DashboardSummaryResponse
 
@@ -220,3 +221,154 @@ def get_purchase_dashboard(
         })
 
     return result
+@router.get("/top-products")
+def get_top_products(
+    limit: int = Query(10, ge=1, le=20),
+    db: Session = Depends(get_db)
+):
+    sale_packaging = aliased(ProductPackaging)
+    base_packaging = aliased(ProductPackaging)
+
+    products = db.execute(
+        select(
+            Product.product_id,
+            Product.product_name,
+            Product.brand_name,
+
+            # Quantity ko base unit me convert karo
+            func.coalesce(
+                func.sum(
+                    InvoiceItem.quantity *
+                    sale_packaging.conversion_to_base
+                ),
+                0
+            ).label("sold_quantity"),
+
+            # Total sales amount
+            func.coalesce(
+                func.sum(InvoiceItem.line_total),
+                0
+            ).label("sales_amount"),
+
+            # Base unit name (packet/piece/bottle)
+            base_packaging.unit_name.label("base_unit")
+        )
+
+        # Product -> InvoiceItem
+        .join(
+            InvoiceItem,
+            Product.product_id == InvoiceItem.product_id
+        )
+
+        # Invoice me jis packaging me sale hui (carton/packet)
+        .join(
+            sale_packaging,
+            (InvoiceItem.packaging_id == sale_packaging.packaging_id)
+            & (InvoiceItem.product_id == sale_packaging.product_id)
+        )
+
+        # Usi product ki base packaging
+        .join(
+            base_packaging,
+            (Product.product_id == base_packaging.product_id)
+            & (base_packaging.is_base_unit == True)
+        )
+
+        .group_by(
+            Product.product_id,
+            Product.product_name,
+            Product.brand_name,
+            base_packaging.unit_name
+        )
+
+        .order_by(
+            func.sum(
+                InvoiceItem.quantity *
+                sale_packaging.conversion_to_base
+            ).desc()
+        )
+
+        .limit(limit)
+    ).all()
+
+    return [
+        {
+            "rank": index + 1,
+            "product_id": row.product_id,
+            "product_name": row.product_name,
+            "brand_name": row.brand_name,
+            "sold_quantity": float(row.sold_quantity),
+            "base_unit": row.base_unit,
+            "sales_amount": float(row.sales_amount)
+        }
+        for index, row in enumerate(products)
+    ]
+@router.get("/low-stock")
+def get_low_stock_products(
+    threshold: int = Query(
+        100,
+        ge=0,
+        description="Minimum stock threshold in base unit"
+    ),
+    db: Session = Depends(get_db)
+):
+    base_packaging = aliased(ProductPackaging)
+
+    products = db.execute(
+        select(
+            Product.product_id,
+            Product.product_name,
+            Product.brand_name,
+
+            func.coalesce(
+                func.sum(InventoryMovement.base_quantity),
+                0
+            ).label("current_stock"),
+
+            base_packaging.unit_name.label("base_unit")
+        )
+        .join(
+            base_packaging,
+            (Product.product_id == base_packaging.product_id)
+            & (base_packaging.is_base_unit == True)
+        )
+        .outerjoin(
+            InventoryMovement,
+            Product.product_id == InventoryMovement.product_id
+        )
+        .group_by(
+            Product.product_id,
+            Product.product_name,
+            Product.brand_name,
+            base_packaging.unit_name
+        )
+        .having(
+            func.coalesce(
+                func.sum(InventoryMovement.base_quantity),
+                0
+            ) <= threshold
+        )
+        .order_by(
+            func.coalesce(
+                func.sum(InventoryMovement.base_quantity),
+                0
+            ).asc()
+        )
+    ).all()
+
+    return [
+        {
+            "product_id": row.product_id,
+            "product_name": row.product_name,
+            "brand_name": row.brand_name,
+            "current_stock": float(row.current_stock),
+            "base_unit": row.base_unit,
+            "threshold": threshold,
+            "stock_status": (
+                "OUT_OF_STOCK"
+                if float(row.current_stock) == 0
+                else "LOW_STOCK"
+            )
+        }
+        for row in products
+    ]

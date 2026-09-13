@@ -14,6 +14,7 @@ from app.routers.invoices import router as invoices_router
 from app.routers.deliveries import router as deliveries_router
 from app.routers.payments import router as payments_router
 from app.routers.returns import router as returns_router
+from app.routers import dashboard
 app = FastAPI(
     title="DukaanPulse API",
     description="Wholesale Distribution Analytics Platform",
@@ -32,6 +33,7 @@ app.include_router(invoices_router)
 app.include_router(deliveries_router)
 app.include_router(payments_router)
 app.include_router(returns_router)
+app.include_router(dashboard.router)
 @app.get("/")
 def root():
     return {

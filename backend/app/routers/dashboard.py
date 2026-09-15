@@ -12,6 +12,7 @@ from app.models.invoice import Invoice, InvoiceItem
 from app.models.purchase import Purchase
 from app.models.inventory import InventoryMovement
 from app.models.packaging import ProductPackaging
+from app.models.payment import Payment
 
 from app.schemas.dashboard import DashboardSummaryResponse
 
@@ -372,3 +373,56 @@ def get_low_stock_products(
         }
         for row in products
     ]
+@router.get("/payment-summary")
+def get_payment_summary(
+    db: Session = Depends(get_db)
+):
+    total_invoices = db.scalar(
+        select(func.count(Invoice.invoice_id))
+    )
+
+    paid_invoices = db.scalar(
+        select(func.count(Invoice.invoice_id))
+        .where(Invoice.status == "PAID")
+    )
+
+    partially_paid_invoices = db.scalar(
+        select(func.count(Invoice.invoice_id))
+        .where(Invoice.status == "PARTIALLY_PAID")
+    )
+
+    unpaid_invoices = db.scalar(
+        select(func.count(Invoice.invoice_id))
+        .where(Invoice.status == "UNPAID")
+    )
+
+    total_sales_amount = db.scalar(
+        select(
+            func.coalesce(
+                func.sum(Invoice.total_amount),
+                0
+            )
+        )
+    )
+
+    total_paid_amount = db.scalar(
+        select(
+            func.coalesce(
+                func.sum(Payment.amount),
+                0
+            )
+        )
+    )
+
+    pending_amount = float(total_sales_amount) - float(total_paid_amount)
+
+    return {
+        "total_invoices": total_invoices,
+        "paid_invoices": paid_invoices,
+        "partially_paid_invoices": partially_paid_invoices,
+        "unpaid_invoices": unpaid_invoices,
+
+        "total_sales_amount": float(total_sales_amount),
+        "total_paid_amount": float(total_paid_amount),
+        "pending_amount": pending_amount
+    }

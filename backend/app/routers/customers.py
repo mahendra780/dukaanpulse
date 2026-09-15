@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
@@ -13,14 +13,54 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=list[CustomerResponse])
-def get_customers(db: Session = Depends(get_db)):
-    result = db.execute(
+@router.get("/")
+def get_customers(
+    search: str | None = Query(
+        default=None,
+        description="Search by customer name or phone"
+    ),
+    area: str | None = Query(
+        default=None,
+        description="Filter customers by area"
+    ),
+    db: Session = Depends(get_db)
+):
+    query = (
         select(Customer)
         .order_by(Customer.customer_id)
     )
 
-    return result.scalars().all()
+    # Search by customer name or phone
+    if search:
+        keyword = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Customer.customer_name.ilike(keyword),
+                Customer.phone.ilike(keyword)
+            )
+        )
+
+    # Filter by area
+    if area:
+        query = query.where(
+            Customer.area.ilike(area.strip())
+        )
+
+    customers = db.execute(query).scalars().all()
+
+    return [
+        {
+            "customer_id": customer.customer_id,
+            "customer_name": customer.customer_name,
+            "phone": customer.phone,
+            "address": customer.address,
+            "area": customer.area,
+            "credit_limit": float(customer.credit_limit),
+            "payment_terms_days": customer.payment_terms_days,
+            "status": customer.status
+        }
+        for customer in customers
+    ]
 
 
 @router.post(

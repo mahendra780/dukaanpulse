@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends,HTTPException,Body
+from fastapi import APIRouter, Depends, HTTPException, Query,Body
 from app.models.category import Category
-from sqlalchemy import select,func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.database import get_db
@@ -15,8 +15,14 @@ router = APIRouter(
 
 
 @router.get("/")
-def get_products(db: Session = Depends(get_db)):
-    result = db.execute(
+def get_products(
+    search: str | None = Query(
+        default=None,
+        description="Search by product name, brand or SKU"
+    ),
+    db: Session = Depends(get_db)
+):
+    query = (
         select(Product)
         .options(
             joinedload(Product.category),
@@ -25,32 +31,70 @@ def get_products(db: Session = Depends(get_db)):
         .order_by(Product.product_id)
     )
 
-    products = result.scalars().unique().all()
+    # Search filter
+    if search:
+        keyword = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Product.product_name.ilike(keyword),
+                Product.brand_name.ilike(keyword),
+                Product.sku.ilike(keyword)
+            )
+        )
 
-    return [
-        {
+    products = db.execute(query).unique().scalars().all()
+
+    result = []
+
+    for product in products:
+        # Current stock from inventory ledger
+        current_stock = db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(InventoryMovement.base_quantity),
+                    0
+                )
+            ).where(
+                InventoryMovement.product_id == product.product_id
+            )
+        )
+
+        result.append({
             "product_id": product.product_id,
             "product_name": product.product_name,
             "brand_name": product.brand_name,
             "sku": product.sku,
             "status": product.status,
-            "category": product.category.category_name,
+            "category": (
+                product.category.category_name
+                if product.category
+                else None
+            ),
+            "current_stock": float(current_stock),
+            "base_unit": next(
+                (
+                    p.unit_name
+                    for p in product.packaging
+                    if p.is_base_unit
+                ),
+                None
+            ),
             "packaging": [
                 {
-                    "packaging_id": packaging.packaging_id,
-                    "unit_name": packaging.unit_name,
+                    "packaging_id": p.packaging_id,
+                    "unit_name": p.unit_name,
                     "conversion_to_base": float(
-                        packaging.conversion_to_base
+                        p.conversion_to_base
                     ),
-                    "is_base_unit": packaging.is_base_unit,
-                    "is_purchase_unit": packaging.is_purchase_unit,
-                    "is_sale_unit": packaging.is_sale_unit
+                    "is_base_unit": p.is_base_unit,
+                    "is_purchase_unit": p.is_purchase_unit,
+                    "is_sale_unit": p.is_sale_unit
                 }
-                for packaging in product.packaging
+                for p in product.packaging
             ]
-        }
-        for product in products
-    ]
+        })
+
+    return result
 @router.get("/{product_id}")
 def get_product(
     product_id: int,

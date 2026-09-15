@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session,joinedload
 
@@ -126,37 +127,67 @@ def create_purchase(
 
 @router.get("/")
 def get_purchases(
+    from_date: date | None = Query(
+        default=None,
+        alias="from",
+        description="Start date (YYYY-MM-DD)"
+    ),
+    to_date: date | None = Query(
+        default=None,
+        alias="to",
+        description="End date (YYYY-MM-DD)"
+    ),
+    supplier_id: int | None = Query(
+        default=None,
+        description="Filter by supplier ID"
+    ),
+    status: str | None = Query(
+        default=None,
+        description="Filter by purchase status"
+    ),
     db: Session = Depends(get_db)
 ):
-    purchases = db.execute(
+    query = (
         select(Purchase)
         .options(
             joinedload(Purchase.supplier),
-            joinedload(Purchase.items)
-            .joinedload(PurchaseItem.product),
-            joinedload(Purchase.items)
-            .joinedload(PurchaseItem.packaging)
+            joinedload(Purchase.items).joinedload(PurchaseItem.product),
+            joinedload(Purchase.items).joinedload(PurchaseItem.packaging)
         )
-        .order_by(Purchase.purchase_id.desc())
-    ).unique().scalars().all()
+        .order_by(Purchase.purchase_date.desc())
+    )
 
-    result = []
+    # Date range filter
+    if from_date:
+        query = query.where(Purchase.purchase_date >= from_date)
 
-    for purchase in purchases:
-        result.append({
+    if to_date:
+        query = query.where(Purchase.purchase_date <= to_date)
+
+    # Supplier filter
+    if supplier_id:
+        query = query.where(Purchase.supplier_id == supplier_id)
+
+    # Status filter
+    if status:
+        query = query.where(Purchase.status == status.upper())
+
+    purchases = db.execute(query).unique().scalars().all()
+
+    return [
+        {
             "purchase_id": purchase.purchase_id,
             "supplier_id": purchase.supplier_id,
             "supplier_name": (
                 purchase.supplier.supplier_name
-                if purchase.supplier
-                else None
+                if purchase.supplier else None
             ),
             "purchase_date": purchase.purchase_date,
             "supplier_invoice_no": purchase.supplier_invoice_no,
-            "subtotal": purchase.subtotal,
-            "discount": purchase.discount,
-            "tax": purchase.tax,
-            "total_amount": purchase.total_amount,
+            "subtotal": float(purchase.subtotal),
+            "discount": float(purchase.discount),
+            "tax": float(purchase.tax),
+            "total_amount": float(purchase.total_amount),
             "status": purchase.status,
             "items": [
                 {
@@ -164,27 +195,25 @@ def get_purchases(
                     "product_id": item.product_id,
                     "product_name": (
                         item.product.product_name
-                        if item.product
-                        else None
+                        if item.product else None
                     ),
                     "packaging_id": item.packaging_id,
                     "unit_name": (
                         item.packaging.unit_name
-                        if item.packaging
-                        else None
+                        if item.packaging else None
                     ),
-                    "quantity": item.quantity,
-                    "received_quantity": item.received_quantity,
-                    "unit_price": item.unit_price,
-                    "discount": item.discount,
-                    "tax": item.tax,
-                    "line_total": item.line_total
+                    "quantity": float(item.quantity),
+                    "received_quantity": float(item.received_quantity),
+                    "unit_price": float(item.unit_price),
+                    "discount": float(item.discount),
+                    "tax": float(item.tax),
+                    "line_total": float(item.line_total)
                 }
                 for item in purchase.items
             ]
-        })
-
-    return result
+        }
+        for purchase in purchases
+    ]
 @router.get("/{purchase_id}")
 def get_purchase(
     purchase_id: int,

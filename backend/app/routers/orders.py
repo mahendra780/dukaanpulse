@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException,Body
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query,Body
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session,joinedload
 
 
@@ -89,32 +89,49 @@ def create_order(
     }
 @router.get("/")
 def get_orders(
+    status: str | None = Query(
+        default=None,
+        description="Filter by order status"
+    ),
+    search: str | None = Query(
+        default=None,
+        description="Search by customer name"
+    ),
     db: Session = Depends(get_db)
 ):
-    orders = db.execute(
+    query = (
         select(Order)
         .options(
             joinedload(Order.customer),
-            joinedload(Order.items).joinedload(
-                OrderItem.product
-            ),
-            joinedload(Order.items).joinedload(
-                OrderItem.packaging
-            )
+            joinedload(Order.items).joinedload(OrderItem.product),
+            joinedload(Order.items).joinedload(OrderItem.packaging)
         )
         .order_by(Order.order_id.desc())
-    ).unique().scalars().all()
+    )
 
-    result = []
+    # Filter by status
+    if status:
+        query = query.where(
+            Order.status == status.upper()
+        )
 
-    for order in orders:
-        result.append({
+    # Search by customer name
+    if search:
+        keyword = f"%{search.strip()}%"
+        query = (
+            query.join(Customer)
+            .where(Customer.customer_name.ilike(keyword))
+        )
+
+    orders = db.execute(query).unique().scalars().all()
+
+    return [
+        {
             "order_id": order.order_id,
             "customer_id": order.customer_id,
             "customer_name": (
                 order.customer.customer_name
-                if order.customer
-                else None
+                if order.customer else None
             ),
             "order_date": order.order_date,
             "status": order.status,
@@ -125,22 +142,20 @@ def get_orders(
                     "product_id": item.product_id,
                     "product_name": (
                         item.product.product_name
-                        if item.product
-                        else None
+                        if item.product else None
                     ),
                     "packaging_id": item.packaging_id,
                     "unit_name": (
                         item.packaging.unit_name
-                        if item.packaging
-                        else None
+                        if item.packaging else None
                     ),
-                    "quantity": item.quantity
+                    "quantity": float(item.quantity)
                 }
                 for item in order.items
             ]
-        })
-
-    return result
+        }
+        for order in orders
+    ]
 
 @router.get("/{order_id}")
 def get_order(

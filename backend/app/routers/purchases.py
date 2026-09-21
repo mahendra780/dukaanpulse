@@ -1,11 +1,13 @@
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query,Body
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
 from app.db.database import get_db
 from app.models.purchase import Purchase, PurchaseItem
 from app.models.product import Product
+from app.models.inventory import InventoryMovement
 from app.models.packaging import ProductPackaging
 from app.models.supplier import Supplier
 from app.schemas.purchase import PurchaseCreate
@@ -46,76 +48,102 @@ def create_purchase(
             detail="Supplier invoice already exists"
         )
 
-    purchase = Purchase(
-        supplier_id=data.supplier_id,
-        purchase_date=data.purchase_date,
-        supplier_invoice_no=data.supplier_invoice_no,
-        subtotal=data.subtotal,
-        discount=data.discount,
-        tax=data.tax,
-        total_amount=data.total_amount,
-        status=data.status
-    )
+    calculated_subtotal = sum(item.quantity * item.unit_price for item in data.items)
+    calculated_discount = sum(item.discount for item in data.items)
+    calculated_tax = sum(item.tax for item in data.items)
+    calculated_total = sum(item.line_total for item in data.items)
 
-    db.add(purchase)
-    db.flush()
+    if (
+        abs(data.subtotal - calculated_subtotal) > 0.01
+        or abs(data.discount - calculated_discount) > 0.01
+        or abs(data.tax - calculated_tax) > 0.01
+        or abs(data.total_amount - calculated_total) > 0.01
+        or any(
+            abs(item.line_total - (item.quantity * item.unit_price - item.discount + item.tax)) > 0.01
+            for item in data.items
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Purchase totals do not match the submitted line items",
+        )
 
-    for item in data.items:
+    try:
+        purchase = Purchase(
+            supplier_id=data.supplier_id,
+            purchase_date=data.purchase_date,
+            supplier_invoice_no=data.supplier_invoice_no,
+            subtotal=data.subtotal,
+            discount=data.discount,
+            tax=data.tax,
+            total_amount=data.total_amount,
+            status=data.status,
+        )
 
-        # Check product
-        product = db.get(Product, item.product_id)
+        db.add(purchase)
+        db.flush()
 
-        if not product:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Product {item.product_id} not found"
-            )
-
-        # Check packaging belongs to product
-        packaging = db.execute(
-            select(ProductPackaging).where(
-                ProductPackaging.packaging_id == item.packaging_id,
-                ProductPackaging.product_id == item.product_id
-            )
-        ).scalar_one_or_none()
-
-        if not packaging:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Packaging {item.packaging_id} "
-                    f"does not belong to product {item.product_id}"
+        purchase_items = []
+        for item in data.items:
+            product = db.get(Product, item.product_id)
+            if not product:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product {item.product_id} not found",
                 )
+
+            packaging = db.execute(
+                select(ProductPackaging).where(
+                    ProductPackaging.packaging_id == item.packaging_id,
+                    ProductPackaging.product_id == item.product_id,
+                )
+            ).scalar_one_or_none()
+            if not packaging:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Packaging {item.packaging_id} "
+                        f"does not belong to product {item.product_id}"
+                    ),
+                )
+
+            if item.received_quantity > item.quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Received quantity cannot exceed purchase quantity",
+                )
+
+            purchase_item = PurchaseItem(
+                purchase_id=purchase.purchase_id,
+                product_id=item.product_id,
+                packaging_id=item.packaging_id,
+                quantity=item.quantity,
+                received_quantity=item.received_quantity,
+                unit_price=item.unit_price,
+                discount=item.discount,
+                tax=item.tax,
+                line_total=item.line_total,
             )
+            db.add(purchase_item)
+            purchase_items.append(purchase_item)
 
-        if item.received_quantity > item.quantity:
-            raise HTTPException(
-                status_code=400,
-                detail="Received quantity cannot exceed purchase quantity"
-            )
+        db.flush()
 
-        purchase_item = PurchaseItem(
-            purchase_id=purchase.purchase_id,
-            product_id=item.product_id,
-            packaging_id=item.packaging_id,
-            quantity=item.quantity,
-            received_quantity=item.received_quantity,
-            unit_price=item.unit_price,
-            discount=item.discount,
-            tax=item.tax,
-            line_total=item.line_total
-        )
-    db.add(purchase_item)
-    db.flush()
+        if purchase.status == "RECEIVED":
+            for purchase_item in purchase_items:
+                create_purchase_movement(db, purchase_item)
 
-    if purchase.status == "RECEIVED":
-        create_purchase_movement(
-            db,
-            purchase_item
-        )
-
-    db.commit()
-    db.refresh(purchase)
+        db.commit()
+        db.refresh(purchase)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Purchase conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to create purchase")
 
     return {
         "message": "Purchase created successfully",
@@ -278,4 +306,144 @@ def get_purchase(
             }
             for item in purchase.items
         ]
+    }
+
+@router.patch("/{purchase_id}/status")
+def update_purchase_status(
+    purchase_id: int,
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    purchase = db.get(Purchase, purchase_id)
+
+    if not purchase:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Purchase {purchase_id} not found"
+        )
+
+    new_status = data.get("status")
+
+    allowed_status = ["PENDING", "RECEIVED", "CANCELLED"]
+
+    if new_status not in allowed_status:
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be PENDING, RECEIVED or CANCELLED"
+        )
+
+    current_status = purchase.status
+
+    # Prevent changing already finished purchases
+    if current_status in ["RECEIVED", "CANCELLED"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Purchase cannot be updated from status {current_status}"
+        )
+
+    valid_transitions = {
+        "PENDING": ["RECEIVED", "CANCELLED"]
+    }
+
+    if new_status not in valid_transitions[current_status]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status transition: {current_status} → {new_status}"
+        )
+
+    try:
+        purchase.status = new_status
+
+        # ==============================
+        # INVENTORY UPDATE
+        # ==============================
+        if new_status == "RECEIVED":
+
+            purchase_items = db.execute(
+                select(PurchaseItem).where(
+                    PurchaseItem.purchase_id == purchase.purchase_id
+                )
+            ).scalars().all()
+
+        for item in purchase_items:
+
+            # Prevent duplicate inventory entry
+                existing_movement = db.execute(
+                    select(InventoryMovement).where(
+                        InventoryMovement.purchase_item_id == item.purchase_item_id,
+                        InventoryMovement.movement_type == "PURCHASE"
+                    )
+                ).scalar_one_or_none()
+
+                if existing_movement:
+                    continue
+
+                if item.received_quantity is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Received quantity is required for product {item.product_id}"
+                    )
+
+                if item.received_quantity <= 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Received quantity must be greater than 0 for product {item.product_id}"
+                    )
+
+                if item.received_quantity > item.quantity:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Received quantity cannot exceed ordered quantity for product {item.product_id}"
+                    )
+
+                packaging = db.execute(
+                    select(ProductPackaging).where(
+                        ProductPackaging.packaging_id == item.packaging_id,
+                        ProductPackaging.product_id == item.product_id
+                    )
+                ).scalar_one_or_none()
+
+                packaging = db.execute(
+                    select(ProductPackaging).where(
+                        ProductPackaging.packaging_id == item.packaging_id,
+                        ProductPackaging.product_id == item.product_id
+                    )
+                ).scalar_one_or_none()
+
+                if packaging is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Packaging {item.packaging_id} not found for product {item.product_id}"
+                    )
+
+                base_quantity = (
+                    item.received_quantity *
+                    packaging.conversion_to_base
+                )
+
+                movement = InventoryMovement(
+                    product_id=item.product_id,
+                    base_quantity=base_quantity,
+                    movement_type="PURCHASE",
+                    purchase_item_id=item.purchase_item_id,
+                    notes=f"Purchase #{purchase.purchase_id} received"
+                )
+
+                db.add(movement)
+
+        db.commit()
+        db.refresh(purchase)
+
+    except Exception as e:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to update purchase status: {str(e)}"
+        )
+
+    return {
+        "message": "Purchase status updated successfully",
+        "purchase_id": purchase.purchase_id,
+        "status": purchase.status
     }

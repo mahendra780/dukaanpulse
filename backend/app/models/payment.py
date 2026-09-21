@@ -5,6 +5,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     Numeric,
     String,
     Text,
@@ -20,6 +21,7 @@ class Payment(Base):
 
     payment_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 

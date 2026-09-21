@@ -5,6 +5,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     String,
     Text,
     func
@@ -19,13 +20,15 @@ class Delivery(Base):
 
     delivery_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
     invoice_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("invoices.invoice_id"),
-        nullable=False
+        nullable=False,
+        unique=True
     )
 
     delivery_date: Mapped[date | None] = mapped_column(

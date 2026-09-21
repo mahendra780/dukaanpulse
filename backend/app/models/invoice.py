@@ -5,6 +5,8 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Identity,
     Numeric,
     String,
     func
@@ -19,6 +21,7 @@ class Invoice(Base):
 
     invoice_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -104,9 +107,20 @@ class Invoice(Base):
 
 class InvoiceItem(Base):
     __tablename__ = "invoice_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["packaging_id", "product_id"],
+            [
+                "product_packaging.packaging_id",
+                "product_packaging.product_id",
+            ],
+            name="fk_invoice_item_packaging",
+        ),
+    )
 
     invoice_item_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -124,7 +138,6 @@ class InvoiceItem(Base):
 
     packaging_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product_packaging.packaging_id"),
         nullable=False
     )
 
@@ -162,10 +175,12 @@ class InvoiceItem(Base):
 
     product = relationship(
         "Product",
-        back_populates="invoice_items"
+        back_populates="invoice_items",
+        overlaps="invoice_items"
     )
 
     packaging = relationship(
         "ProductPackaging",
-        back_populates="invoice_items"
+        back_populates="invoice_items",
+        overlaps="invoice_items,product"
     )

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session,joinedload
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.database import get_db
 from app.models.invoice import Invoice, InvoiceItem
-from app.models.order import Order
+from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.packaging import ProductPackaging
 from app.schemas.invoice import InvoiceCreate
@@ -22,7 +23,11 @@ def create_invoice(
     db: Session = Depends(get_db)
 ):
     # Check order
-    order = db.get(Order, data.order_id)
+    order = db.execute(
+        select(Order)
+        .options(joinedload(Order.items))
+        .where(Order.order_id == data.order_id)
+    ).unique().scalar_one_or_none()
 
     if not order:
         raise HTTPException(
@@ -50,61 +55,100 @@ def create_invoice(
             detail="Cancelled order cannot be invoiced"
         )
 
-    invoice = Invoice(
-        order_id=data.order_id,
-        invoice_number=data.invoice_number,
-        invoice_date=data.invoice_date,
-        subtotal=data.subtotal,
-        discount=data.discount,
-        tax=data.tax,
-        total_amount=data.total_amount,
-        status=data.status
+    submitted_order_items = sorted(
+        (item.product_id, item.packaging_id, item.quantity) for item in data.items
     )
+    order_items = sorted(
+        (item.product_id, item.packaging_id, float(item.quantity))
+        for item in order.items
+    )
+    if submitted_order_items != order_items:
+        raise HTTPException(
+            status_code=422,
+            detail="Invoice items must match the selected order items",
+        )
 
-    db.add(invoice)
-    db.flush()
+    calculated_subtotal = sum(item.quantity * item.unit_price for item in data.items)
+    calculated_discount = sum(item.discount for item in data.items)
+    calculated_tax = sum(item.tax for item in data.items)
+    calculated_total = sum(item.line_total for item in data.items)
+    if (
+        abs(data.subtotal - calculated_subtotal) > 0.01
+        or abs(data.discount - calculated_discount) > 0.01
+        or abs(data.tax - calculated_tax) > 0.01
+        or abs(data.total_amount - calculated_total) > 0.01
+        or any(
+            abs(item.line_total - (item.quantity * item.unit_price - item.discount + item.tax)) > 0.01
+            for item in data.items
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Invoice totals do not match the submitted line items",
+        )
 
-    for item in data.items:
+    try:
+        invoice = Invoice(
+            order_id=data.order_id,
+            invoice_number=data.invoice_number,
+            invoice_date=data.invoice_date,
+            subtotal=data.subtotal,
+            discount=data.discount,
+            tax=data.tax,
+            total_amount=data.total_amount,
+            status=data.status,
+        )
 
-        product = db.get(Product, item.product_id)
+        db.add(invoice)
+        db.flush()
 
-        if not product:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Product {item.product_id} not found"
-            )
+        for item in data.items:
+            product = db.get(Product, item.product_id)
+            if not product:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product {item.product_id} not found",
+                )
 
-        packaging = db.execute(
-            select(ProductPackaging).where(
-                ProductPackaging.packaging_id == item.packaging_id,
-                ProductPackaging.product_id == item.product_id
-            )
-        ).scalar_one_or_none()
+            packaging = db.execute(
+                select(ProductPackaging).where(
+                    ProductPackaging.packaging_id == item.packaging_id,
+                    ProductPackaging.product_id == item.product_id,
+                )
+            ).scalar_one_or_none()
+            if not packaging:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Packaging {item.packaging_id} "
+                        f"does not belong to product {item.product_id}"
+                    ),
+                )
 
-        if not packaging:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Packaging {item.packaging_id} "
-                    f"does not belong to product {item.product_id}"
+            db.add(
+                InvoiceItem(
+                    invoice_id=invoice.invoice_id,
+                    product_id=item.product_id,
+                    packaging_id=item.packaging_id,
+                    quantity=item.quantity,
+                    unit_price=item.unit_price,
+                    discount=item.discount,
+                    tax=item.tax,
+                    line_total=item.line_total,
                 )
             )
 
-        invoice_item = InvoiceItem(
-            invoice_id=invoice.invoice_id,
-            product_id=item.product_id,
-            packaging_id=item.packaging_id,
-            quantity=item.quantity,
-            unit_price=item.unit_price,
-            discount=item.discount,
-            tax=item.tax,
-            line_total=item.line_total
-        )
-
-        db.add(invoice_item)
-
-    db.commit()
-    db.refresh(invoice)
+        db.commit()
+        db.refresh(invoice)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Invoice conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to create invoice")
 
     return {
         "message": "Invoice created successfully",

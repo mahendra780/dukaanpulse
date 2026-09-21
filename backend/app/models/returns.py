@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Numeric,
     String,
     Text,
@@ -21,6 +22,7 @@ class Return(Base):
 
     return_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -85,6 +87,7 @@ class ReturnItem(Base):
 
     return_item_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 

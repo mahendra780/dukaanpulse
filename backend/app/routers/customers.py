@@ -78,7 +78,8 @@ def create_customer(
         address=data.address,
         area=data.area,
         credit_limit=data.credit_limit,
-        payment_terms_days=data.payment_terms_days
+        payment_terms_days=data.payment_terms_days,
+        status=data.status,
     )
 
     db.add(customer)

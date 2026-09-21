@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Identity,
     Numeric,
     String,
     Text,
@@ -19,6 +20,7 @@ class InventoryMovement(Base):
 
     movement_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -52,11 +54,13 @@ class InventoryMovement(Base):
 
     invoice_item_id: Mapped[int | None] = mapped_column(
         BigInteger,
+        ForeignKey("invoice_items.invoice_item_id"),
         nullable=True
     )
 
     return_item_id: Mapped[int | None] = mapped_column(
         BigInteger,
+        ForeignKey("return_items.return_item_id"),
         nullable=True
     )
 

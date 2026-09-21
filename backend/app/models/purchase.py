@@ -5,9 +5,12 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Identity,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,9 +21,15 @@ from app.db.database import Base
 
 class Purchase(Base):
     __tablename__ = "purchases"
+    __table_args__ = (
+        UniqueConstraint(
+            "supplier_id", "supplier_invoice_no", name="uq_supplier_invoice"
+        ),
+    )
 
     purchase_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -90,9 +99,20 @@ class Purchase(Base):
 
 class PurchaseItem(Base):
     __tablename__ = "purchase_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["packaging_id", "product_id"],
+            [
+                "product_packaging.packaging_id",
+                "product_packaging.product_id",
+            ],
+            name="fk_purchase_item_packaging",
+        ),
+    )
 
     purchase_item_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -110,7 +130,6 @@ class PurchaseItem(Base):
 
     packaging_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product_packaging.packaging_id"),
         nullable=False
     )
 
@@ -153,10 +172,12 @@ class PurchaseItem(Base):
     )
     product = relationship(
         "Product",
-        back_populates="purchases"
+        back_populates="purchases",
+        overlaps="purchase_items"
     )
     packaging = relationship(
         "ProductPackaging",
-        back_populates="purchase_items"
+        back_populates="purchase_items",
+        overlaps="product,purchases"
     )
   

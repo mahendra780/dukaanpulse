@@ -61,6 +61,7 @@ export const updateDeliveryStatus = (id, status) => api.patch(`/deliveries/${id}
 // ---- Payments ----
 export const listPayments = () => api.get("/payments/").then((r) => r.data);
 export const createPayment = (data) => api.post("/payments/", data).then((r) => r.data);
+export const applyCustomerCredit = (invoiceId) => api.post("/payments/apply-credit", { invoice_id: invoiceId }).then((r) => r.data);
 
 // ---- Returns ----
 export const listReturns = () => api.get("/returns/").then((r) => r.data);

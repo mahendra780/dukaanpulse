@@ -8,9 +8,18 @@ import Modal from "../components/Modal";
 const PAYMENT_METHODS = ["CASH", "UPI", "BANK_TRANSFER", "CHEQUE"];
 const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-function CreatePaymentModal({ payableInvoices, remainingByInvoice, onClose, onCreated }) {
-  const [invoiceId, setInvoiceId] = useState(payableInvoices[0]?.invoice_id ?? "");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+function CreatePaymentModal({
+  payableInvoices,
+  remainingByInvoice,
+  onClose,
+  onCreated,
+}) {
+  const [invoiceId, setInvoiceId] = useState(
+    payableInvoices[0]?.invoice_id ?? "",
+  );
+  const [paymentDate, setPaymentDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
   const [referenceNumber, setReferenceNumber] = useState("");
@@ -24,6 +33,8 @@ function CreatePaymentModal({ payableInvoices, remainingByInvoice, onClose, onCr
     e.preventDefault();
     setError("");
 
+    // Mirrors the backend's own check (payments.py: data.amount > remaining_amount)
+    // so the person gets an immediate, specific error instead of a round trip.
     if (Number(amount) > remaining) {
       setError(`Payment exceeds remaining amount. Remaining: ${remaining}`);
       return;
@@ -54,36 +65,68 @@ function CreatePaymentModal({ payableInvoices, remainingByInvoice, onClose, onCr
         <div className="field-row">
           <div className="field">
             <label>Invoice</label>
-            <select required value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)}>
+            <select
+              required
+              value={invoiceId}
+              onChange={(e) => setInvoiceId(e.target.value)}
+            >
               {payableInvoices.map((inv) => (
-                <option key={inv.invoice_id} value={inv.invoice_id}>{inv.invoice_number}</option>
+                <option key={inv.invoice_id} value={inv.invoice_id}>
+                  {inv.invoice_number}
+                </option>
               ))}
             </select>
           </div>
           <div className="field">
             <label>Payment date</label>
-            <input type="date" required value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+            <input
+              type="date"
+              required
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+            />
           </div>
         </div>
 
-        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>Remaining on this invoice: {currency(remaining)}</p>
+        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+          Remaining on this invoice: {currency(remaining)}
+        </p>
 
         <div className="field-row">
           <div className="field">
             <label>Amount</label>
-            <input type="number" min="0.01" step="any" max={remaining} required value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <input
+              type="number"
+              min="0.01"
+              step="any"
+              max={remaining}
+              required
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
           </div>
           <div className="field">
             <label>Payment method</label>
-            <select required value={method} onChange={(e) => setMethod(e.target.value)}>
-              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replaceAll("_", " ")}</option>)}
+            <select
+              required
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m.replaceAll("_", " ")}
+                </option>
+              ))}
             </select>
           </div>
         </div>
         <div className="field-row">
           <div className="field">
             <label>Reference number</label>
-            <input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
+            <input
+              value={referenceNumber}
+              onChange={(e) => setReferenceNumber(e.target.value)}
+            />
           </div>
           <div className="field">
             <label>Notes</label>
@@ -91,8 +134,16 @@ function CreatePaymentModal({ payableInvoices, remainingByInvoice, onClose, onCr
           </div>
         </div>
         <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || remaining <= 0}>{saving ? "Saving…" : "Record payment"}</button>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={saving || remaining <= 0}
+          >
+            {saving ? "Saving…" : "Record payment"}
+          </button>
         </div>
       </form>
     </Modal>
@@ -118,20 +169,27 @@ export default function Payments() {
   };
 
   useEffect(load, []);
+
+  // Remaining = invoice.total_amount - sum(payments for that invoice),
+  // computed the same way payments.py does it server-side.
   const remainingByInvoice = useMemo(() => {
     const paidByInvoice = {};
     payments.forEach((p) => {
-      paidByInvoice[p.invoice_id] = (paidByInvoice[p.invoice_id] || 0) + Number(p.amount);
+      paidByInvoice[p.invoice_id] =
+        (paidByInvoice[p.invoice_id] || 0) + Number(p.amount);
     });
     const map = {};
     invoices.forEach((inv) => {
-      map[inv.invoice_id] = Number(inv.total_amount) - (paidByInvoice[inv.invoice_id] || 0);
+      map[inv.invoice_id] =
+        Number(inv.total_amount) - (paidByInvoice[inv.invoice_id] || 0);
     });
     return map;
   }, [payments, invoices]);
 
   const payableInvoices = invoices.filter(
-    (inv) => inv.status !== "CANCELLED" && (remainingByInvoice[inv.invoice_id] ?? 0) > 0
+    (inv) =>
+      inv.status !== "CANCELLED" &&
+      (remainingByInvoice[inv.invoice_id] ?? 0) > 0,
   );
 
   return (
@@ -139,14 +197,22 @@ export default function Payments() {
       <div className="page-header">
         <div>
           <h1>Payments</h1>
-          <p>{payments.length} payment{payments.length === 1 ? "" : "s"}</p>
+          <p>
+            {payments.length} payment{payments.length === 1 ? "" : "s"}
+          </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={payableInvoices.length === 0}>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowCreate(true)}
+          disabled={payableInvoices.length === 0}
+        >
           <Plus size={15} /> Record payment
         </button>
       </div>
       {payableInvoices.length === 0 && !loading && (
-        <p className="muted" style={{ marginTop: -10 }}>No invoices currently have a balance due.</p>
+        <p className="muted" style={{ marginTop: -10 }}>
+          No invoices currently have a balance due.
+        </p>
       )}
 
       <ErrorBanner message={error} />
@@ -177,6 +243,8 @@ export default function Payments() {
                   <td>
                     {p.payment_method === "RETURN_CREDIT" ? (
                       <span className="badge badge-accent">Return credit</span>
+                    ) : p.payment_method === "CREDIT_APPLIED" ? (
+                      <span className="badge badge-accent">Credit applied</span>
                     ) : (
                       p.payment_method?.replaceAll("_", " ")
                     )}

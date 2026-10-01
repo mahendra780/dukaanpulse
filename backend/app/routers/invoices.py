@@ -25,7 +25,7 @@ def create_invoice(
     data: InvoiceCreate,
     db: Session = Depends(get_db)
 ):
-
+    # Check order
     order = db.execute(
         select(Order)
         .options(joinedload(Order.items))
@@ -38,6 +38,7 @@ def create_invoice(
             detail="Order not found"
         )
 
+    # Prevent multiple invoices with same invoice number
     existing_invoice = db.execute(
         select(Invoice).where(
             Invoice.invoice_number == data.invoice_number
@@ -50,19 +51,28 @@ def create_invoice(
             detail="Invoice number already exists"
         )
 
+    # Basic order status validation
     if order.status == "CANCELLED":
         raise HTTPException(
             status_code=400,
             detail="Cancelled order cannot be invoiced"
         )
 
+    # Only a confirmed order (or one already partially invoiced) can be
+    # invoiced. This used to be unenforced here -- the frontend only
+    # offered CONFIRMED orders in its picker, but the API itself let a
+    # PENDING or COMPLETED order be invoiced directly.
     if order.status not in ("CONFIRMED", "PARTIALLY_FULFILLED"):
         raise HTTPException(
             status_code=400,
             detail=f"Order must be CONFIRMED or PARTIALLY_FULFILLED to be invoiced (current status: {order.status})",
         )
 
-
+    # Each submitted line just needs to belong to this order and not
+    # exceed what's left to invoice on that line -- NOT match the
+    # order's full quantity exactly. This is what makes partial
+    # invoicing (and therefore PARTIALLY_FULFILLED) possible: one order
+    # can now be covered by more than one invoice over time.
     already_invoiced = get_invoiced_quantities(db, order.order_id)
     order_items_by_key = {
         (item.product_id, item.packaging_id): float(item.quantity)
@@ -163,7 +173,9 @@ def create_invoice(
 
         db.flush()
 
-
+        # Now that this invoice's items are flushed, get_invoiced_quantities
+        # (used inside recalculate_order_status) will see them when it
+        # re-sums invoiced quantity per order line.
         recalculate_order_status(db, order)
 
         db.commit()
@@ -193,7 +205,15 @@ def cancel_invoice(
     data: dict = Body(...),
     db: Session = Depends(get_db)
 ):
-
+    """
+    The only supported transition here is -> CANCELLED, and only from
+    UNPAID. This exists specifically for "this invoice shouldn't have
+    been created this way" (e.g. invoiced more than was actually in
+    stock, wrong order picked) -- NOT for unwinding a paid sale, which
+    is a refund question this endpoint deliberately doesn't attempt to
+    answer. Cancelling frees the invoiced quantity back onto the order
+    (see recalculate_order_status) so a corrected invoice can be made.
+    """
     new_status = data.get("status")
 
     if new_status != "CANCELLED":
@@ -330,7 +350,7 @@ def get_invoice(
     invoice = db.execute(
         select(Invoice)
         .options(
-            joinedload(Invoice.order),
+            joinedload(Invoice.order).joinedload(Order.customer),
             joinedload(Invoice.items).joinedload(
                 InvoiceItem.product
             ),
@@ -349,7 +369,9 @@ def get_invoice(
             status_code=404,
             detail=f"Invoice {invoice_id} not found"
         )
+
     returned = get_returned_quantities(db, invoice_id)
+    customer = invoice.order.customer if invoice.order else None
 
     return {
         "invoice_id": invoice.invoice_id,
@@ -361,6 +383,10 @@ def get_invoice(
         "tax": invoice.tax,
         "total_amount": invoice.total_amount,
         "status": invoice.status,
+
+        "customer_id": customer.customer_id if customer else None,
+        "customer_name": customer.customer_name if customer else None,
+        "customer_credit_balance": float(customer.credit_balance) if customer else 0,
 
         "items": [
             {
@@ -382,6 +408,9 @@ def get_invoice(
                 "discount": item.discount,
                 "tax": item.tax,
                 "line_total": item.line_total,
+                # How much of this line is still eligible for a
+                # return -- sold quantity minus whatever's already
+                # been claimed by a non-rejected/cancelled return.
                 "returned_quantity": returned.get((item.product_id, item.packaging_id), 0),
                 "returnable_quantity": float(item.quantity) - returned.get((item.product_id, item.packaging_id), 0),
             }
@@ -399,6 +428,13 @@ def get_invoice(
             }
             for payment in invoice.payments
         ],
+
+        # A cancelled delivery attempt doesn't block a fresh one for
+        # the same invoice (see deliveries.py), so an invoice can now
+        # have more than one delivery row over time. "delivery" here
+        # is whichever one is still active (not cancelled) -- that's
+        # the one that actually matters for "is this order on its way".
+        # Every attempt, including cancelled ones, is in "deliveries".
         "delivery": next(
             (
                 {

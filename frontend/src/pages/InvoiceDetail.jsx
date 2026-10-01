@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getInvoice, cancelInvoice } from "../api/endpoints";
+import {
+  getInvoice,
+  cancelInvoice,
+  applyCustomerCredit,
+} from "../api/endpoints";
 import { extractErrorMessage } from "../api/client";
 import { Spinner, ErrorBanner, EmptyState } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
@@ -13,6 +17,7 @@ export default function InvoiceDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [applyingCredit, setApplyingCredit] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -38,6 +43,19 @@ export default function InvoiceDetail() {
     }
   };
 
+  const handleApplyCredit = async () => {
+    setError("");
+    setApplyingCredit(true);
+    try {
+      await applyCustomerCredit(id);
+      load();
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setApplyingCredit(false);
+    }
+  };
+
   if (loading) return <Spinner />;
   if (error && !invoice) return <ErrorBanner message={error} />;
   if (!invoice) return null;
@@ -45,7 +63,17 @@ export default function InvoiceDetail() {
   const totalPaid = invoice.payments.reduce((s, p) => s + Number(p.amount), 0);
   const remaining = Number(invoice.total_amount) - totalPaid;
 
+  // Mirrors the backend's own rule exactly (invoices.py -> cancel_invoice):
+  // only an UNPAID invoice with no active delivery can be cancelled here.
   const canCancel = invoice.status === "UNPAID" && !invoice.delivery;
+  const canApplyCredit =
+    remaining > 0 &&
+    invoice.status !== "CANCELLED" &&
+    Number(invoice.customer_credit_balance) > 0;
+  const creditToApply = Math.min(
+    remaining,
+    Number(invoice.customer_credit_balance || 0),
+  );
   const cancelledDeliveryCount = (invoice.deliveries || []).filter(
     (d) => d.status === "CANCELLED",
   ).length;
@@ -153,6 +181,10 @@ export default function InvoiceDetail() {
                           <span className="badge badge-accent">
                             Return credit
                           </span>
+                        ) : p.payment_method === "CREDIT_APPLIED" ? (
+                          <span className="badge badge-accent">
+                            Credit applied
+                          </span>
                         ) : (
                           p.payment_method?.replaceAll("_", " ")
                         )}
@@ -169,6 +201,33 @@ export default function InvoiceDetail() {
                   : " · fully paid"}
               </p>
             </>
+          )}
+          {canApplyCredit && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                background: "var(--accent-soft)",
+                borderRadius: "var(--radius)",
+              }}
+            >
+              <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                This customer has{" "}
+                <strong>{currency(invoice.customer_credit_balance)}</strong>{" "}
+                credit available (from an earlier return). Apply{" "}
+                <strong>{currency(creditToApply)}</strong> of it to this
+                invoice?
+              </p>
+              <button
+                className="btn btn-primary"
+                disabled={applyingCredit}
+                onClick={handleApplyCredit}
+              >
+                {applyingCredit
+                  ? "Applying…"
+                  : `Apply ${currency(creditToApply)} credit`}
+              </button>
+            </div>
           )}
           {remaining > 0 && invoice.status !== "CANCELLED" && (
             <Link

@@ -6,6 +6,10 @@ import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 
+// Mirrors the backend's valid_transitions map exactly
+// (app/routers/deliveries.py -> update_delivery_status).
+// FAILED is not terminal -- it can retry back to OUT_FOR_DELIVERY.
+// DELIVERED and CANCELLED are the only terminal states.
 const NEXT_STATUS = {
   PENDING: [["DISPATCHED", "Dispatch"], ["CANCELLED", "Cancel"]],
   DISPATCHED: [["OUT_FOR_DELIVERY", "Out for delivery"], ["FAILED", "Mark failed"], ["CANCELLED", "Cancel"]],
@@ -17,18 +21,30 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
   const [invoiceId, setInvoiceId] = useState(deliverableInvoices[0]?.invoice_id ?? "");
   const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [addressTouched, setAddressTouched] = useState(false);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Auto-fill from the selected invoice's customer address -- only
+  // while the person hasn't typed their own address, so switching
+  // invoices doesn't clobber a manual edit they already made.
+  useEffect(() => {
+    if (addressTouched) return;
+    const invoice = deliverableInvoices.find((inv) => inv.invoice_id === Number(invoiceId));
+    setDeliveryAddress(invoice?.customer_address || "");
+  }, [invoiceId, deliverableInvoices, addressTouched]);
+
   const submit = async (e) => {
     e.preventDefault();
     setError("");
     setSaving(true);
     try {
-
+      // Always created as PENDING — the DISPATCHED/DELIVERED/CANCELLED
+      // transitions happen afterwards via the status action, matching
+      // the workflow the status-transition endpoint enforces.
       await createDelivery({
         invoice_id: Number(invoiceId),
         delivery_date: deliveryDate || null,
@@ -53,9 +69,11 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
         <div className="field-row">
           <div className="field">
             <label>Invoice</label>
-            <select required value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)}>
+            <select required value={invoiceId} onChange={(e) => { setInvoiceId(e.target.value); setAddressTouched(false); }}>
               {deliverableInvoices.map((inv) => (
-                <option key={inv.invoice_id} value={inv.invoice_id}>{inv.invoice_number}</option>
+                <option key={inv.invoice_id} value={inv.invoice_id}>
+                  {inv.invoice_number}{inv.customer_name ? ` — ${inv.customer_name}` : ""}
+                </option>
               ))}
             </select>
           </div>
@@ -66,7 +84,14 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
         </div>
         <div className="field">
           <label>Delivery address</label>
-          <input required value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} />
+          <input
+            required
+            value={deliveryAddress}
+            onChange={(e) => { setDeliveryAddress(e.target.value); setAddressTouched(true); }}
+          />
+          <p className="muted" style={{ fontSize: 11.5, marginTop: 4, marginBottom: 0 }}>
+            Auto-filled from the customer's saved address — edit if this delivery goes somewhere else.
+          </p>
         </div>
         <div className="field-row">
           <div className="field">
@@ -112,11 +137,17 @@ export default function Deliveries() {
   };
 
   useEffect(load, []);
-   const invoicesWithActiveDelivery = new Set(
+
+  // Backend allows a new delivery once every existing delivery for
+  // that invoice is CANCELLED (a fresh attempt after a failed/cancelled
+  // one) -- only an ACTIVE (non-cancelled) delivery blocks a new one.
+  const invoicesWithActiveDelivery = new Set(
     deliveries.filter((d) => d.status !== "CANCELLED").map((d) => d.invoice_id)
   );
-   const deliverableInvoices = invoices.filter((inv) => !invoicesWithActiveDelivery.has(inv.invoice_id));
+  const deliverableInvoices = invoices.filter((inv) => !invoicesWithActiveDelivery.has(inv.invoice_id));
 
+  // GET /deliveries/ has no status query param (unlike purchases/orders),
+  // so filtering is done client-side here rather than re-fetching.
   const visibleDeliveries = statusFilter ? deliveries.filter((d) => d.status === statusFilter) : deliveries;
 
   const transition = async (id, status) => {
@@ -144,7 +175,8 @@ export default function Deliveries() {
         </button>
       </div>
       {deliverableInvoices.length === 0 && !loading && (
-        <p className="muted" style={{ marginTop: -10 }}>Every invoice already has an active (non-cancelled) delivery.</p>)}
+        <p className="muted" style={{ marginTop: -10 }}>Every invoice already has an active (non-cancelled) delivery.</p>
+      )}
 
       <div className="table-toolbar">
         <select style={{ maxWidth: 200 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>

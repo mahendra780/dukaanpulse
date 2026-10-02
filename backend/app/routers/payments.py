@@ -112,10 +112,19 @@ def apply_customer_credit(
     equivalent of "the refund we owed you now pays for this order"
     rather than a cash refund.
     """
-    invoice_id = data.get("invoice_id")
+    raw_invoice_id = data.get("invoice_id")
 
-    if not invoice_id:
+    if not raw_invoice_id:
         raise HTTPException(status_code=400, detail="invoice_id is required")
+
+    try:
+        # The frontend sends this as a plain JSON body (not a typed
+        # Pydantic schema), so it can arrive as a string -- bind it as
+        # an int explicitly, or Postgres rejects comparing bigint
+        # invoice_id columns against a VARCHAR parameter.
+        invoice_id = int(raw_invoice_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invoice_id must be a number")
 
     invoice = db.get(Invoice, invoice_id)
 

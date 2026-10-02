@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { listInvoices, listOrders, getOrder, createInvoice } from "../api/endpoints";
 import { extractErrorMessage } from "../api/client";
@@ -7,12 +7,16 @@ import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 
+// An order can now be invoiced across MORE THAN ONE invoice over time
+// (see PARTIALLY_FULFILLED) -- so quantity per line is editable here,
+// capped at that line's remaining_quantity (ordered minus already
+// invoiced on other non-cancelled invoices, computed server-side).
 function CreateInvoiceModal({ orders, onClose, onCreated }) {
   const [orderId, setOrderId] = useState(orders[0]?.order_id ?? "");
   const [orderDetail, setOrderDetail] = useState(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
-  const [lines, setLines] = useState({});
+  const [lines, setLines] = useState({}); // order_item_id -> { quantity, unit_price, discount, tax }
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -46,6 +50,9 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
     e.preventDefault();
     setError("");
 
+    // Only send lines where the person actually entered a quantity >0 —
+    // this is what makes partial invoicing possible (skip a line
+    // entirely, or invoice less than what's remaining on it).
     const itemsToSend = invoiceableItems
       .filter((it) => Number(lines[it.order_item_id]?.quantity) > 0)
       .map((it) => ({
@@ -65,7 +72,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
 
     setSaving(true);
     try {
-      await createInvoice({
+      const result = await createInvoice({
         order_id: Number(orderId),
         invoice_number: invoiceNumber,
         invoice_date: invoiceDate,
@@ -76,7 +83,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
         status: "UNPAID",
         items: itemsToSend,
       });
-      onCreated();
+      onCreated(result.invoice_id);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -172,6 +179,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
 }
 
 export default function Invoices() {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -180,6 +188,9 @@ export default function Invoices() {
 
   const load = () => {
     setLoading(true);
+    // An order remains invoiceable as long as it's CONFIRMED or
+    // PARTIALLY_FULFILLED (still has something left to invoice) —
+    // listOrders only takes one status at a time, so fetch both.
     Promise.all([listInvoices(), listOrders({ status: "CONFIRMED" }), listOrders({ status: "PARTIALLY_FULFILLED" })])
       .then(([inv, confirmed, partial]) => {
         setInvoices(inv);
@@ -241,9 +252,10 @@ export default function Invoices() {
         <CreateInvoiceModal
           orders={orders}
           onClose={() => setShowCreate(false)}
-          onCreated={() => {
+          onCreated={(invoiceId) => {
             setShowCreate(false);
-            load();
+
+            navigate(`/invoices/${invoiceId}`);
           }}
         />
       )}

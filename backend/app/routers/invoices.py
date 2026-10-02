@@ -292,7 +292,7 @@ def get_invoices(
     invoices = db.execute(
         select(Invoice)
         .options(
-            joinedload(Invoice.order),
+            joinedload(Invoice.order).joinedload(Order.customer),
             joinedload(Invoice.items).joinedload(
                 InvoiceItem.product
             ),
@@ -306,6 +306,8 @@ def get_invoices(
     result = []
 
     for invoice in invoices:
+        customer = invoice.order.customer if invoice.order else None
+
         result.append({
             "invoice_id": invoice.invoice_id,
             "order_id": invoice.order_id,
@@ -316,6 +318,10 @@ def get_invoices(
             "tax": invoice.tax,
             "total_amount": invoice.total_amount,
             "status": invoice.status,
+            # Used by the Deliveries page to auto-fill the delivery
+            # address when an invoice is selected.
+            "customer_name": customer.customer_name if customer else None,
+            "customer_address": customer.address if customer else None,
             "items": [
                 {
                     "invoice_item_id": item.invoice_item_id,

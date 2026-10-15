@@ -12,7 +12,7 @@ from app.models.supplier import Supplier
 from app.schemas.purchase import PurchaseCreate, PurchaseReceive
 from app.services.inventory_service import create_purchase_movement
 from app.services.purchase_service import recalculate_purchase_status
-
+from app.services.status_rules import ensure_active_supplier, ensure_active_products
 
 router = APIRouter(
     prefix="/purchases",
@@ -25,6 +25,8 @@ def create_purchase(
     data: PurchaseCreate,
     db: Session = Depends(get_db)
 ):
+    ensure_active_supplier(db, data.supplier_id, "purchase")
+    ensure_active_products(db, [item.product_id for item in data.items], "purchase")
     supplier = db.get(Supplier, data.supplier_id)
 
     if not supplier:

@@ -6,6 +6,9 @@ import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import ProductPackagingSelect from "../components/ProductPackagingSelect";
+import { useToast } from "../components/ToastProvider";
+import { useConfirm } from "../components/ConfirmProvider";
+import { successMessage } from "../lib/messages";
 
 const emptyItem = () => ({ product_id: "", packaging_id: "", quantity: "" });
 
@@ -13,6 +16,18 @@ const NEXT_STATUS = {
   PENDING: [["CONFIRMED", "Confirm"], ["CANCELLED", "Cancel"]],
   CONFIRMED: [["COMPLETED", "Complete"], ["CANCELLED", "Cancel"]],
   PARTIALLY_FULFILLED: [["COMPLETED", "Complete (waive rest)"], ["CANCELLED", "Cancel"]],
+};
+
+const BUSY_LABEL = {
+  CONFIRMED: "Confirming…",
+  COMPLETED: "Completing…",
+  CANCELLED: "Cancelling…",
+};
+
+const DONE_VERB = {
+  CONFIRMED: "confirmed",
+  COMPLETED: "completed",
+  CANCELLED: "cancelled",
 };
 
 function availableStock(products, productId, packagingId) {
@@ -33,6 +48,7 @@ function CreateOrderModal({ customers, products, onClose, onCreated }) {
   const [items, setItems] = useState([emptyItem()]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   const updateItem = (i, patch) => setItems((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
@@ -52,6 +68,7 @@ function CreateOrderModal({ customers, products, onClose, onCreated }) {
           quantity: Number(it.quantity),
         })),
       });
+      toast.success(successMessage("Order", "created"));
       onCreated();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -116,7 +133,7 @@ function CreateOrderModal({ customers, products, onClose, onCreated }) {
 
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "Create order"}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Creating order…" : "Create order"}</button>
         </div>
       </form>
     </Modal>
@@ -131,10 +148,13 @@ export default function Orders() {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [busyId, setBusyId] = useState(null);
+  const [busy, setBusy] = useState(null); // { id, status } of the row action in flight
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = () => {
     setLoading(true);
+    setError("");
     Promise.all([listOrders({ status: statusFilter || undefined }), listCustomers(), listProducts()])
       .then(([o, c, p]) => {
         setOrders(o);
@@ -147,18 +167,41 @@ export default function Orders() {
 
   useEffect(load, [statusFilter]);
 
-  const transition = async (id, status) => {
-    setBusyId(id);
-    setError("");
+  const transition = async (order, status) => {
+    if (status === "CANCELLED") {
+      const ok = await confirm({
+        title: "Cancel this order?",
+        description: `The order for ${order.customer_name} (${order.order_date}) will be cancelled. This can't be undone.`,
+        confirmLabel: "Cancel order",
+        cancelLabel: "Keep order",
+        danger: true,
+      });
+      if (!ok) return;
+    } else if (status === "COMPLETED") {
+      const ok = await confirm({
+        title: "Mark this order as completed?",
+        description: `The order for ${order.customer_name} (${order.order_date}) will be closed, and no further invoices can be created for it. Any quantity not yet invoiced will be waived.`,
+        confirmLabel: "Mark completed",
+      });
+      if (!ok) return;
+    }
+
+    setBusy({ id: order.order_id, status });
     try {
-      await updateOrderStatus(id, status);
+      await updateOrderStatus(order.order_id, status);
+      toast.success(successMessage("Order", DONE_VERB[status]));
       load();
     } catch (err) {
-      setError(extractErrorMessage(err));
+      toast.error(extractErrorMessage(err));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   };
+
+  // INACTIVE customers/products can't be used on a NEW order (the
+  // backend enforces this too), so they aren't offered.
+  const activeCustomers = customers.filter((c) => c.status === "ACTIVE");
+  const activeProducts = products.filter((p) => p.status === "ACTIVE");
 
   return (
     <div>
@@ -167,7 +210,7 @@ export default function Orders() {
           <h1>Orders</h1>
           <p>{orders.length} order{orders.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={customers.length === 0 || products.length === 0}>
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={activeCustomers.length === 0 || activeProducts.length === 0}>
           <Plus size={15} /> New order
         </button>
       </div>
@@ -188,7 +231,13 @@ export default function Orders() {
       {loading ? (
         <Spinner />
       ) : orders.length === 0 ? (
-        <EmptyState label="No orders found" />
+        <EmptyState
+          label={
+            statusFilter
+              ? "No orders match the selected filter."
+              : "No orders found. Create your first order to start billing customers."
+          }
+        />
       ) : (
         <div className="table-wrap">
           <table>
@@ -202,23 +251,31 @@ export default function Orders() {
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => (
-                <tr key={o.order_id}>
-                  <td>{o.customer_name}</td>
-                  <td>{o.order_date}</td>
-                  <td className="num">₹{o.total_amount.toLocaleString("en-IN")}</td>
-                  <td><StatusBadge status={o.status} /></td>
-                  <td>
-                    <div className="section-actions">
-                      {(NEXT_STATUS[o.status] || []).map(([next, label]) => (
-                        <button key={next} className={next === "CANCELLED" ? "btn btn-ghost" : "btn btn-secondary"} disabled={busyId === o.order_id} onClick={() => transition(o.order_id, next)}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {orders.map((o) => {
+                const rowBusy = busy?.id === o.order_id;
+                return (
+                  <tr key={o.order_id}>
+                    <td>{o.customer_name}</td>
+                    <td>{o.order_date}</td>
+                    <td className="num">₹{o.total_amount.toLocaleString("en-IN")}</td>
+                    <td><StatusBadge status={o.status} /></td>
+                    <td>
+                      <div className="section-actions">
+                        {(NEXT_STATUS[o.status] || []).map(([next, label]) => (
+                          <button
+                            key={next}
+                            className={next === "CANCELLED" ? "btn btn-ghost" : "btn btn-secondary"}
+                            disabled={rowBusy}
+                            onClick={() => transition(o, next)}
+                          >
+                            {rowBusy && busy.status === next ? BUSY_LABEL[next] : label}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -226,8 +283,8 @@ export default function Orders() {
 
       {showCreate && (
         <CreateOrderModal
-          customers={customers}
-          products={products}
+          customers={activeCustomers}
+          products={activeProducts}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);

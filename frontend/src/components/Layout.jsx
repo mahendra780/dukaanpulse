@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Package,
@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Boxes,
 } from "lucide-react";
+import ErrorBoundary from "./ErrorBoundary";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -30,6 +31,8 @@ const links = [
 ];
 
 export default function Layout() {
+  const location = useLocation();
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -49,7 +52,11 @@ export default function Layout() {
         ))}
       </aside>
       <main className="main">
-        <Outlet />
+        {/* Keyed by path: if a page crashes, the sidebar still works and
+            navigating to another page starts the boundary fresh. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

@@ -4,9 +4,10 @@ import { listPurchasePayments, listPurchases, createPurchasePayment } from "../a
 import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import Modal from "../components/Modal";
+import { useToast } from "../components/ToastProvider";
+import { successMessage } from "../lib/messages";
 
 const PAYMENT_METHODS = ["CASH", "UPI", "BANK_TRANSFER", "CHEQUE"];
-
 const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 function CreatePurchasePaymentModal({ payablePurchases, remainingByPurchase, onClose, onCreated }) {
@@ -18,6 +19,7 @@ function CreatePurchasePaymentModal({ payablePurchases, remainingByPurchase, onC
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   const remaining = remainingByPurchase[purchaseId] ?? 0;
 
@@ -26,7 +28,7 @@ function CreatePurchasePaymentModal({ payablePurchases, remainingByPurchase, onC
     setError("");
 
     if (Number(amount) > remaining) {
-      setError(`Payment exceeds remaining amount. Remaining: ${remaining}`);
+      setError(`Payment can't be more than the remaining amount (${currency(remaining)}).`);
       return;
     }
 
@@ -40,6 +42,7 @@ function CreatePurchasePaymentModal({ payablePurchases, remainingByPurchase, onC
         reference_number: referenceNumber || null,
         notes: notes || null,
       });
+      toast.success(successMessage("Supplier payment", "recorded"));
       onCreated();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -93,7 +96,7 @@ function CreatePurchasePaymentModal({ payablePurchases, remainingByPurchase, onC
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || remaining <= 0}>{saving ? "Saving…" : "Record payment"}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || remaining <= 0}>{saving ? "Recording payment…" : "Record payment"}</button>
         </div>
       </form>
     </Modal>
@@ -109,6 +112,7 @@ export default function PurchasePayments() {
 
   const load = () => {
     setLoading(true);
+    setError("");
     Promise.all([listPurchasePayments(), listPurchases()])
       .then(([p, pu]) => {
         setPayments(p);
@@ -132,6 +136,7 @@ export default function PurchasePayments() {
     return map;
   }, [payments, purchases]);
 
+
   const payablePurchases = purchases.filter(
     (p) => p.status !== "CANCELLED" && (remainingByPurchase[p.purchase_id] ?? 0) > 0
   );
@@ -140,7 +145,7 @@ export default function PurchasePayments() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Purchase payments</h1>
+          <h1>Supplier payments</h1>
           <p>{payments.length} payment{payments.length === 1 ? "" : "s"} to suppliers</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={payablePurchases.length === 0}>
@@ -156,7 +161,7 @@ export default function PurchasePayments() {
       {loading ? (
         <Spinner />
       ) : payments.length === 0 ? (
-        <EmptyState label="No supplier payments recorded yet" />
+        <EmptyState label="No supplier payments recorded yet. Payments you make against purchases will appear here." />
       ) : (
         <div className="table-wrap">
           <table>

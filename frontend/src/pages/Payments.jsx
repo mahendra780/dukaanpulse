@@ -4,28 +4,23 @@ import { listPayments, listInvoices, createPayment } from "../api/endpoints";
 import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import Modal from "../components/Modal";
+import { useToast } from "../components/ToastProvider";
+import { successMessage } from "../lib/messages";
+
 
 const PAYMENT_METHODS = ["CASH", "UPI", "BANK_TRANSFER", "CHEQUE"];
 const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-function CreatePaymentModal({
-  payableInvoices,
-  remainingByInvoice,
-  onClose,
-  onCreated,
-}) {
-  const [invoiceId, setInvoiceId] = useState(
-    payableInvoices[0]?.invoice_id ?? "",
-  );
-  const [paymentDate, setPaymentDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+function CreatePaymentModal({ payableInvoices, remainingByInvoice, onClose, onCreated }) {
+  const [invoiceId, setInvoiceId] = useState(payableInvoices[0]?.invoice_id ?? "");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
   const [referenceNumber, setReferenceNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   const remaining = remainingByInvoice[invoiceId] ?? 0;
 
@@ -33,10 +28,9 @@ function CreatePaymentModal({
     e.preventDefault();
     setError("");
 
-    // Mirrors the backend's own check (payments.py: data.amount > remaining_amount)
-    // so the person gets an immediate, specific error instead of a round trip.
+
     if (Number(amount) > remaining) {
-      setError(`Payment exceeds remaining amount. Remaining: ${remaining}`);
+      setError(`Payment can't be more than the remaining amount (${currency(remaining)}).`);
       return;
     }
 
@@ -50,6 +44,7 @@ function CreatePaymentModal({
         reference_number: referenceNumber || null,
         notes: notes || null,
       });
+      toast.success(successMessage("Payment", "recorded"));
       onCreated();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -65,68 +60,36 @@ function CreatePaymentModal({
         <div className="field-row">
           <div className="field">
             <label>Invoice</label>
-            <select
-              required
-              value={invoiceId}
-              onChange={(e) => setInvoiceId(e.target.value)}
-            >
+            <select required value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)}>
               {payableInvoices.map((inv) => (
-                <option key={inv.invoice_id} value={inv.invoice_id}>
-                  {inv.invoice_number}
-                </option>
+                <option key={inv.invoice_id} value={inv.invoice_id}>{inv.invoice_number}</option>
               ))}
             </select>
           </div>
           <div className="field">
             <label>Payment date</label>
-            <input
-              type="date"
-              required
-              value={paymentDate}
-              onChange={(e) => setPaymentDate(e.target.value)}
-            />
+            <input type="date" required value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
           </div>
         </div>
 
-        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
-          Remaining on this invoice: {currency(remaining)}
-        </p>
+        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>Remaining on this invoice: {currency(remaining)}</p>
 
         <div className="field-row">
           <div className="field">
             <label>Amount</label>
-            <input
-              type="number"
-              min="0.01"
-              step="any"
-              max={remaining}
-              required
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
+            <input type="number" min="0.01" step="any" max={remaining} required value={amount} onChange={(e) => setAmount(e.target.value)} />
           </div>
           <div className="field">
             <label>Payment method</label>
-            <select
-              required
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-            >
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {m.replaceAll("_", " ")}
-                </option>
-              ))}
+            <select required value={method} onChange={(e) => setMethod(e.target.value)}>
+              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replaceAll("_", " ")}</option>)}
             </select>
           </div>
         </div>
         <div className="field-row">
           <div className="field">
             <label>Reference number</label>
-            <input
-              value={referenceNumber}
-              onChange={(e) => setReferenceNumber(e.target.value)}
-            />
+            <input value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} />
           </div>
           <div className="field">
             <label>Notes</label>
@@ -134,16 +97,8 @@ function CreatePaymentModal({
           </div>
         </div>
         <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={saving || remaining <= 0}
-          >
-            {saving ? "Saving…" : "Record payment"}
-          </button>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || remaining <= 0}>{saving ? "Recording payment…" : "Record payment"}</button>
         </div>
       </form>
     </Modal>
@@ -159,6 +114,7 @@ export default function Payments() {
 
   const load = () => {
     setLoading(true);
+    setError("");
     Promise.all([listPayments(), listInvoices()])
       .then(([p, inv]) => {
         setPayments(p);
@@ -170,49 +126,36 @@ export default function Payments() {
 
   useEffect(load, []);
 
-  // Remaining = invoice.total_amount - sum(payments for that invoice),
-  // computed the same way payments.py does it server-side.
+
   const remainingByInvoice = useMemo(() => {
     const paidByInvoice = {};
     payments.forEach((p) => {
-      paidByInvoice[p.invoice_id] =
-        (paidByInvoice[p.invoice_id] || 0) + Number(p.amount);
+      paidByInvoice[p.invoice_id] = (paidByInvoice[p.invoice_id] || 0) + Number(p.amount);
     });
     const map = {};
     invoices.forEach((inv) => {
-      map[inv.invoice_id] =
-        Number(inv.total_amount) - (paidByInvoice[inv.invoice_id] || 0);
+      map[inv.invoice_id] = Number(inv.total_amount) - (paidByInvoice[inv.invoice_id] || 0);
     });
     return map;
   }, [payments, invoices]);
 
   const payableInvoices = invoices.filter(
-    (inv) =>
-      inv.status !== "CANCELLED" &&
-      (remainingByInvoice[inv.invoice_id] ?? 0) > 0,
+    (inv) => inv.status !== "CANCELLED" && (remainingByInvoice[inv.invoice_id] ?? 0) > 0
   );
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1>Payments</h1>
-          <p>
-            {payments.length} payment{payments.length === 1 ? "" : "s"}
-          </p>
+          <h1>Customer payments</h1>
+          <p>{payments.length} payment{payments.length === 1 ? "" : "s"}</p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowCreate(true)}
-          disabled={payableInvoices.length === 0}
-        >
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={payableInvoices.length === 0}>
           <Plus size={15} /> Record payment
         </button>
       </div>
       {payableInvoices.length === 0 && !loading && (
-        <p className="muted" style={{ marginTop: -10 }}>
-          No invoices currently have a balance due.
-        </p>
+        <p className="muted" style={{ marginTop: -10 }}>No invoices currently have a balance due.</p>
       )}
 
       <ErrorBanner message={error} />
@@ -220,7 +163,7 @@ export default function Payments() {
       {loading ? (
         <Spinner />
       ) : payments.length === 0 ? (
-        <EmptyState label="No payments recorded yet" />
+        <EmptyState label="No payments recorded yet. Payments you record against invoices will appear here." />
       ) : (
         <div className="table-wrap">
           <table>

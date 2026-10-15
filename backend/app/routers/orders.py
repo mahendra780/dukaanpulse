@@ -11,7 +11,7 @@ from app.models.product import Product
 from app.models.packaging import ProductPackaging
 from app.schemas.order import OrderCreate
 from app.services.order_service import get_invoiced_quantities
-
+from app.services.status_rules import ensure_active_customer, ensure_active_products
 router = APIRouter(
     prefix="/orders",
     tags=["Orders"]
@@ -20,9 +20,12 @@ router = APIRouter(
 
 @router.post("/", status_code=201)
 def create_order(
+    
     data: OrderCreate,
     db: Session = Depends(get_db)
 ):
+    ensure_active_customer(db, data.customer_id, "order")
+    ensure_active_products(db, [item.product_id for item in data.items], "order")
     customer = db.get(Customer, data.customer_id)
 
     if not customer:

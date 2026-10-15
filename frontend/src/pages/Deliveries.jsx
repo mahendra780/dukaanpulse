@@ -5,16 +5,32 @@ import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
+import { useToast } from "../components/ToastProvider";
+import { useConfirm } from "../components/ConfirmProvider";
+import { successMessage } from "../lib/messages";
 
-// Mirrors the backend's valid_transitions map exactly
-// (app/routers/deliveries.py -> update_delivery_status).
-// FAILED is not terminal -- it can retry back to OUT_FOR_DELIVERY.
-// DELIVERED and CANCELLED are the only terminal states.
+
 const NEXT_STATUS = {
   PENDING: [["DISPATCHED", "Dispatch"], ["CANCELLED", "Cancel"]],
   DISPATCHED: [["OUT_FOR_DELIVERY", "Out for delivery"], ["FAILED", "Mark failed"], ["CANCELLED", "Cancel"]],
   OUT_FOR_DELIVERY: [["DELIVERED", "Mark delivered"], ["FAILED", "Mark failed"], ["CANCELLED", "Cancel"]],
   FAILED: [["OUT_FOR_DELIVERY", "Retry delivery"], ["CANCELLED", "Cancel"]],
+};
+
+const BUSY_LABEL = {
+  DISPATCHED: "Dispatching…",
+  OUT_FOR_DELIVERY: "Updating…",
+  DELIVERED: "Marking delivered…",
+  FAILED: "Marking failed…",
+  CANCELLED: "Cancelling…",
+};
+
+const DONE_VERB = {
+  DISPATCHED: "dispatched",
+  OUT_FOR_DELIVERY: "marked as out for delivery",
+  DELIVERED: "marked as delivered",
+  FAILED: "marked as failed",
+  CANCELLED: "cancelled",
 };
 
 function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
@@ -27,10 +43,9 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
-  // Auto-fill from the selected invoice's customer address -- only
-  // while the person hasn't typed their own address, so switching
-  // invoices doesn't clobber a manual edit they already made.
+
   useEffect(() => {
     if (addressTouched) return;
     const invoice = deliverableInvoices.find((inv) => inv.invoice_id === Number(invoiceId));
@@ -42,9 +57,7 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
     setError("");
     setSaving(true);
     try {
-      // Always created as PENDING — the DISPATCHED/DELIVERED/CANCELLED
-      // transitions happen afterwards via the status action, matching
-      // the workflow the status-transition endpoint enforces.
+
       await createDelivery({
         invoice_id: Number(invoiceId),
         delivery_date: deliveryDate || null,
@@ -54,6 +67,7 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
         driver_name: driverName || null,
         notes: notes || null,
       });
+      toast.success(successMessage("Delivery", "created"));
       onCreated();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -109,7 +123,7 @@ function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "Create delivery"}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Creating delivery…" : "Create delivery"}</button>
         </div>
       </form>
     </Modal>
@@ -123,10 +137,13 @@ export default function Deliveries() {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [busyId, setBusyId] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = () => {
     setLoading(true);
+    setError("");
     Promise.all([listDeliveries(), listInvoices()])
       .then(([d, inv]) => {
         setDeliveries(d);
@@ -138,28 +155,41 @@ export default function Deliveries() {
 
   useEffect(load, []);
 
-  // Backend allows a new delivery once every existing delivery for
-  // that invoice is CANCELLED (a fresh attempt after a failed/cancelled
-  // one) -- only an ACTIVE (non-cancelled) delivery blocks a new one.
   const invoicesWithActiveDelivery = new Set(
     deliveries.filter((d) => d.status !== "CANCELLED").map((d) => d.invoice_id)
   );
   const deliverableInvoices = invoices.filter((inv) => !invoicesWithActiveDelivery.has(inv.invoice_id));
 
-  // GET /deliveries/ has no status query param (unlike purchases/orders),
-  // so filtering is done client-side here rather than re-fetching.
   const visibleDeliveries = statusFilter ? deliveries.filter((d) => d.status === statusFilter) : deliveries;
 
-  const transition = async (id, status) => {
-    setBusyId(id);
-    setError("");
+  const transition = async (delivery, status) => {
+    if (status === "CANCELLED") {
+      const ok = await confirm({
+        title: "Cancel this delivery?",
+        description: `The delivery for invoice ${delivery.invoice_number} will be cancelled. You can create a new delivery for the same invoice afterwards.`,
+        confirmLabel: "Cancel delivery",
+        cancelLabel: "Keep delivery",
+        danger: true,
+      });
+      if (!ok) return;
+    } else if (status === "DELIVERED") {
+      const ok = await confirm({
+        title: "Mark as delivered?",
+        description: `Invoice ${delivery.invoice_number} will be marked as delivered and its items will be deducted from your stock. This can't be undone.`,
+        confirmLabel: "Mark delivered",
+      });
+      if (!ok) return;
+    }
+
+    setBusy({ id: delivery.delivery_id, status });
     try {
-      await updateDeliveryStatus(id, status);
+      await updateDeliveryStatus(delivery.delivery_id, status);
+      toast.success(successMessage("Delivery", DONE_VERB[status]));
       load();
     } catch (err) {
-      setError(extractErrorMessage(err));
+      toast.error(extractErrorMessage(err));
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   };
 
@@ -195,7 +225,13 @@ export default function Deliveries() {
       {loading ? (
         <Spinner />
       ) : visibleDeliveries.length === 0 ? (
-        <EmptyState label="No deliveries found" />
+        <EmptyState
+          label={
+            statusFilter
+              ? "No deliveries match the selected filter."
+              : "No deliveries found. Create a delivery for an invoice to start tracking dispatches."
+          }
+        />
       ) : (
         <div className="table-wrap">
           <table>
@@ -211,30 +247,33 @@ export default function Deliveries() {
               </tr>
             </thead>
             <tbody>
-              {visibleDeliveries.map((d) => (
-                <tr key={d.delivery_id}>
-                  <td>{d.invoice_number || "—"}</td>
-                  <td>{d.delivery_date || "—"}</td>
-                  <td>{d.delivery_address}</td>
-                  <td>{d.vehicle_number || "—"}</td>
-                  <td>{d.driver_name || "—"}</td>
-                  <td><StatusBadge status={d.status} /></td>
-                  <td>
-                    <div className="section-actions">
-                      {(NEXT_STATUS[d.status] || []).map(([next, label]) => (
-                        <button
-                          key={next}
-                          className={next === "CANCELLED" ? "btn btn-ghost" : "btn btn-secondary"}
-                          disabled={busyId === d.delivery_id}
-                          onClick={() => transition(d.delivery_id, next)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {visibleDeliveries.map((d) => {
+                const rowBusy = busy?.id === d.delivery_id;
+                return (
+                  <tr key={d.delivery_id}>
+                    <td>{d.invoice_number || "—"}</td>
+                    <td>{d.delivery_date || "—"}</td>
+                    <td>{d.delivery_address}</td>
+                    <td>{d.vehicle_number || "—"}</td>
+                    <td>{d.driver_name || "—"}</td>
+                    <td><StatusBadge status={d.status} /></td>
+                    <td>
+                      <div className="section-actions">
+                        {(NEXT_STATUS[d.status] || []).map(([next, label]) => (
+                          <button
+                            key={next}
+                            className={next === "CANCELLED" ? "btn btn-ghost" : "btn btn-secondary"}
+                            disabled={rowBusy}
+                            onClick={() => transition(d, next)}
+                          >
+                            {rowBusy && busy.status === next ? BUSY_LABEL[next] : label}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

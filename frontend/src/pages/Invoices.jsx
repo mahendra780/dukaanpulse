@@ -6,32 +6,35 @@ import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
+import { useToast } from "../components/ToastProvider";
+import { successMessage } from "../lib/messages";
 
-// An order can now be invoiced across MORE THAN ONE invoice over time
-// (see PARTIALLY_FULFILLED) -- so quantity per line is editable here,
-// capped at that line's remaining_quantity (ordered minus already
-// invoiced on other non-cancelled invoices, computed server-side).
+
 function CreateInvoiceModal({ orders, onClose, onCreated }) {
   const [orderId, setOrderId] = useState(orders[0]?.order_id ?? "");
   const [orderDetail, setOrderDetail] = useState(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
-  const [lines, setLines] = useState({}); // order_item_id -> { quantity, unit_price, discount, tax }
+  const [lines, setLines] = useState({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (!orderId) return;
-    getOrder(orderId).then((o) => {
-      setOrderDetail(o);
-      const l = {};
-      o.items.forEach((it) => {
-        if (it.remaining_quantity > 0) {
-          l[it.order_item_id] = { quantity: it.remaining_quantity, unit_price: "", discount: 0, tax: 0 };
-        }
-      });
-      setLines(l);
-    });
+    setError("");
+    getOrder(orderId)
+      .then((o) => {
+        setOrderDetail(o);
+        const l = {};
+        o.items.forEach((it) => {
+          if (it.remaining_quantity > 0) {
+            l[it.order_item_id] = { quantity: it.remaining_quantity, unit_price: "", discount: 0, tax: 0 };
+          }
+        });
+        setLines(l);
+      })
+      .catch((err) => setError(extractErrorMessage(err)));
   }, [orderId]);
 
   const invoiceableItems = orderDetail ? orderDetail.items.filter((it) => it.remaining_quantity > 0) : [];
@@ -50,9 +53,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
     e.preventDefault();
     setError("");
 
-    // Only send lines where the person actually entered a quantity >0 —
-    // this is what makes partial invoicing possible (skip a line
-    // entirely, or invoice less than what's remaining on it).
+
     const itemsToSend = invoiceableItems
       .filter((it) => Number(lines[it.order_item_id]?.quantity) > 0)
       .map((it) => ({
@@ -66,7 +67,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
       }));
 
     if (itemsToSend.length === 0) {
-      setError("Enter a quantity for at least one item.");
+      setError("Please enter a quantity for at least one item.");
       return;
     }
 
@@ -83,6 +84,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
         status: "UNPAID",
         items: itemsToSend,
       });
+      toast.success(successMessage("Invoice", "created"));
       onCreated(result.invoice_id);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -171,7 +173,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
 
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || invoiceableItems.length === 0}>{saving ? "Saving…" : "Create invoice"}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || invoiceableItems.length === 0}>{saving ? "Creating invoice…" : "Create invoice"}</button>
         </div>
       </form>
     </Modal>
@@ -188,9 +190,8 @@ export default function Invoices() {
 
   const load = () => {
     setLoading(true);
-    // An order remains invoiceable as long as it's CONFIRMED or
-    // PARTIALLY_FULFILLED (still has something left to invoice) —
-    // listOrders only takes one status at a time, so fetch both.
+    setError("");
+
     Promise.all([listInvoices(), listOrders({ status: "CONFIRMED" }), listOrders({ status: "PARTIALLY_FULFILLED" })])
       .then(([inv, confirmed, partial]) => {
         setInvoices(inv);
@@ -222,7 +223,7 @@ export default function Invoices() {
       {loading ? (
         <Spinner />
       ) : invoices.length === 0 ? (
-        <EmptyState label="No invoices found" />
+        <EmptyState label="No invoices found. Invoices are created from confirmed orders — confirm an order first, then create its invoice here." />
       ) : (
         <div className="table-wrap">
           <table>
@@ -254,7 +255,7 @@ export default function Invoices() {
           onClose={() => setShowCreate(false)}
           onCreated={(invoiceId) => {
             setShowCreate(false);
-
+            
             navigate(`/invoices/${invoiceId}`);
           }}
         />

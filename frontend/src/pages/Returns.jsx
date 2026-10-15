@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { listReturns, listInvoices, getInvoice, createReturn, approveReturn, receiveReturn } from "../api/endpoints";
 import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
+import { useToast } from "../components/ToastProvider";
+import { useConfirm } from "../components/ConfirmProvider";
+import { successMessage } from "../lib/messages";
 
 
 const REASONS = ["DAMAGED", "EXPIRED", "WRONG_PRODUCT", "QUALITY_ISSUE", "EXCESS_QUANTITY", "OTHER"];
 const CONDITIONS = ["RESELLABLE", "DAMAGED", "EXPIRED", "SUPPLIER_RETURN"];
+
+const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 function CreateReturnModal({ returnableInvoices, onClose, onCreated }) {
   const [invoiceId, setInvoiceId] = useState(returnableInvoices[0]?.invoice_id ?? "");
@@ -19,10 +24,14 @@ function CreateReturnModal({ returnableInvoices, onClose, onCreated }) {
   const [lines, setLines] = useState({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (!invoiceId) return;
-    getInvoice(invoiceId).then(setInvoiceDetail);
+    setError("");
+    getInvoice(invoiceId)
+      .then(setInvoiceDetail)
+      .catch((err) => setError(extractErrorMessage(err)));
   }, [invoiceId]);
 
   const returnableItems = invoiceDetail ? invoiceDetail.items.filter((it) => it.returnable_quantity > 0) : [];
@@ -44,7 +53,7 @@ function CreateReturnModal({ returnableInvoices, onClose, onCreated }) {
       }));
 
     if (itemsToSend.length === 0) {
-      setError("Enter a quantity for at least one item.");
+      setError("Please enter a quantity for at least one item.");
       return;
     }
 
@@ -58,6 +67,7 @@ function CreateReturnModal({ returnableInvoices, onClose, onCreated }) {
         notes: notes || null,
         items: itemsToSend,
       });
+      toast.success(successMessage("Return", "created"));
       onCreated();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -133,7 +143,7 @@ function CreateReturnModal({ returnableInvoices, onClose, onCreated }) {
 
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || returnableItems.length === 0}>{saving ? "Saving…" : "Create return"}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || returnableItems.length === 0}>{saving ? "Creating return…" : "Create return"}</button>
         </div>
       </form>
     </Modal>
@@ -146,10 +156,13 @@ export default function Returns() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [busyId, setBusyId] = useState(null);
+  const [busy, setBusy] = useState(null); 
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = () => {
     setLoading(true);
+    setError("");
     Promise.all([listReturns(), listInvoices()])
       .then(([r, inv]) => {
         setReturns(r);
@@ -163,16 +176,40 @@ export default function Returns() {
 
   const returnableInvoices = invoices.filter((inv) => inv.status !== "CANCELLED");
 
-  const act = async (fn, id) => {
-    setBusyId(id);
-    setError("");
+  const handleApprove = async (r) => {
+    setBusy({ id: r.return_id, action: "approve" });
     try {
-      await fn(id);
+      await approveReturn(r.return_id);
+      toast.success(successMessage("Return", "approved"));
       load();
     } catch (err) {
-      setError(extractErrorMessage(err));
+      toast.error(extractErrorMessage(err));
     } finally {
-      setBusyId(null);
+      setBusy(null);
+    }
+  };
+
+  const handleReceive = async (r) => {
+    const ok = await confirm({
+      title: "Receive this return?",
+      description: `The returned items for invoice ${r.invoice_number} will be received. Resellable items go back into your stock, and the invoice or the customer's credit balance is credited. This can't be undone.`,
+      confirmLabel: "Receive return",
+    });
+    if (!ok) return;
+
+    setBusy({ id: r.return_id, action: "receive" });
+    try {
+      const result = await receiveReturn(r.return_id);
+      toast.success(successMessage("Return", "received"));
+    
+      if (result?.credit_added_to_customer_balance > 0) {
+        toast.info(`${currency(result.credit_added_to_customer_balance)} was added to the customer's credit balance.`);
+      }
+      load();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -193,7 +230,7 @@ export default function Returns() {
       {loading ? (
         <Spinner />
       ) : returns.length === 0 ? (
-        <EmptyState label="No returns found" />
+        <EmptyState label="No returns found. Returns you create against invoices will appear here." />
       ) : (
         <div className="table-wrap">
           <table>
@@ -208,25 +245,32 @@ export default function Returns() {
               </tr>
             </thead>
             <tbody>
-              {returns.map((r) => (
-                <tr key={r.return_id}>
-                  <td>{r.invoice_number || "—"}</td>
-                  <td>{r.return_date}</td>
-                  <td>{r.reason.replaceAll("_", " ")}</td>
-                  <td>{r.items.map((it) => `${it.product_name} (${it.quantity} ${it.unit_name})`).join(", ")}</td>
-                  <td><StatusBadge status={r.status} /></td>
-                  <td>
-                    <div className="section-actions">
-                      {r.status === "REQUESTED" && (
-                        <button className="btn btn-secondary" disabled={busyId === r.return_id} onClick={() => act(approveReturn, r.return_id)}>Approve</button>
-                      )}
-                      {r.status === "APPROVED" && (
-                        <button className="btn btn-secondary" disabled={busyId === r.return_id} onClick={() => act(receiveReturn, r.return_id)}>Receive</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {returns.map((r) => {
+                const rowBusy = busy?.id === r.return_id;
+                return (
+                  <tr key={r.return_id}>
+                    <td>{r.invoice_number || "—"}</td>
+                    <td>{r.return_date}</td>
+                    <td>{r.reason.replaceAll("_", " ")}</td>
+                    <td>{r.items.map((it) => `${it.product_name} (${it.quantity} ${it.unit_name})`).join(", ")}</td>
+                    <td><StatusBadge status={r.status} /></td>
+                    <td>
+                      <div className="section-actions">
+                        {r.status === "REQUESTED" && (
+                          <button className="btn btn-secondary" disabled={rowBusy} onClick={() => handleApprove(r)}>
+                            {rowBusy && busy.action === "approve" ? "Approving…" : "Approve"}
+                          </button>
+                        )}
+                        {r.status === "APPROVED" && (
+                          <button className="btn btn-secondary" disabled={rowBusy} onClick={() => handleReceive(r)}>
+                            {rowBusy && busy.action === "receive" ? "Receiving…" : "Receive"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

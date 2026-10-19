@@ -11,3 +11,4 @@ from app.models.delivery import Delivery
 from app.models.payment import Payment
 from app.models.purchase_payment import PurchasePayment
 from app.models.returns import Return, ReturnItem
+from app.models.user import User

@@ -7,6 +7,7 @@ import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 
@@ -140,6 +141,7 @@ export default function Deliveries() {
   const [busy, setBusy] = useState(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -200,9 +202,11 @@ export default function Deliveries() {
           <h1>Deliveries</h1>
           <p>{deliveries.length} delivery{deliveries.length === 1 ? "" : "ies"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={deliverableInvoices.length === 0}>
-          <Plus size={15} /> New delivery
-        </button>
+        {can("deliveries:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={deliverableInvoices.length === 0}>
+            <Plus size={15} /> New delivery
+          </button>
+        )}
       </div>
       {deliverableInvoices.length === 0 && !loading && (
         <p className="muted" style={{ marginTop: -10 }}>Every invoice already has an active (non-cancelled) delivery.</p>
@@ -259,7 +263,7 @@ export default function Deliveries() {
                     <td><StatusBadge status={d.status} /></td>
                     <td>
                       <div className="section-actions">
-                        {(NEXT_STATUS[d.status] || []).map(([next, label]) => (
+                        {can("deliveries:write") && (NEXT_STATUS[d.status] || []).map(([next, label]) => (
                           <button
                             key={next}
                             className={next === "CANCELLED" ? "btn btn-ghost" : "btn btn-secondary"}

@@ -3,6 +3,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.customer import Customer
 from app.models.invoice import Invoice
@@ -17,7 +18,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("payments:write"))])
 def create_payment(
     data: PaymentCreate,
     db: Session = Depends(get_db)
@@ -96,7 +97,7 @@ def create_payment(
         "paid_amount": payment.amount,
         "invoice_status": invoice.status
     }
-@router.post("/apply-credit")
+@router.post("/apply-credit", dependencies=[Depends(require_permission("payments:write"))])
 def apply_customer_credit(
     data: dict = Body(...),
     db: Session = Depends(get_db)
@@ -196,7 +197,7 @@ def apply_customer_credit(
     }
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("payments:read"))])
 def get_payments(
     db: Session = Depends(get_db)
 ):

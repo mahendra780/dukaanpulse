@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.customer import Customer
 from app.models.invoice import Invoice, InvoiceItem
@@ -21,7 +22,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("returns:write"))])
 def create_return(
     data: ReturnCreate,
     db: Session = Depends(get_db)
@@ -154,7 +155,7 @@ def create_return(
         "status": return_record.status
     }
 
-@router.patch("/{return_id}/approve")
+@router.patch("/{return_id}/approve", dependencies=[Depends(require_permission("returns:approve"))])
 def approve_return(
     return_id: int,
     db: Session = Depends(get_db)
@@ -189,7 +190,7 @@ def approve_return(
         "return_id": return_record.return_id,
         "status": return_record.status
     }
-@router.patch("/{return_id}/receive")
+@router.patch("/{return_id}/receive", dependencies=[Depends(require_permission("returns:receive"))])
 def receive_return(
     return_id: int,
     db: Session = Depends(get_db)
@@ -305,7 +306,7 @@ def receive_return(
         "invoice_status": invoice.status if invoice is not None else None
     }
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("returns:read"))])
 def get_returns(
     db: Session = Depends(get_db)
 ):
@@ -361,7 +362,7 @@ def get_returns(
         })
 
     return result
-@router.get("/{return_id}")
+@router.get("/{return_id}", dependencies=[Depends(require_permission("returns:read"))])
 def get_return(
     return_id: int,
     db: Session = Depends(get_db)

@@ -7,6 +7,7 @@ import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 
@@ -187,6 +188,7 @@ export default function Invoices() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -210,9 +212,11 @@ export default function Invoices() {
           <h1>Invoices</h1>
           <p>{invoices.length} invoice{invoices.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={orders.length === 0}>
-          <Plus size={15} /> New invoice
-        </button>
+        {can("invoices:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={orders.length === 0}>
+            <Plus size={15} /> New invoice
+          </button>
+        )}
       </div>
       {orders.length === 0 && !loading && (
         <p className="muted" style={{ marginTop: -10 }}>No confirmed or partially fulfilled orders are available to invoice yet.</p>

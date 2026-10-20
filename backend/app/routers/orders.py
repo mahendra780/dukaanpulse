@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.customer import Customer
 from app.models.invoice import Invoice
@@ -18,7 +19,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("orders:write"))])
 def create_order(
     
     data: OrderCreate,
@@ -96,7 +97,7 @@ def create_order(
         "status": order.status
     }
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("orders:read"))])
 def get_orders(
     status: str | None = Query(
         default=None,
@@ -186,7 +187,7 @@ def get_orders(
 
 
 
-@router.get("/{order_id}")
+@router.get("/{order_id}", dependencies=[Depends(require_permission("orders:read"))])
 def get_order(
     order_id: int,
     db: Session = Depends(get_db)
@@ -251,7 +252,7 @@ def get_order(
             for item in order.items
         ]
     }
-@router.patch("/{order_id}/status")
+@router.patch("/{order_id}/status", dependencies=[Depends(require_permission("orders:write"))])
 def update_order_status(
     order_id: int,
     data: dict = Body(...),

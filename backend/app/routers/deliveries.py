@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.delivery import Delivery
 from app.models.invoice import Invoice
@@ -16,7 +17,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("deliveries:write"))])
 def create_delivery(
     data: DeliveryCreate,
     db: Session = Depends(get_db)
@@ -99,7 +100,7 @@ def create_delivery(
         "invoice_id": delivery.invoice_id,
         "status": delivery.status
     }
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("deliveries:read"))])
 def get_deliveries(
     db: Session = Depends(get_db)
 ):
@@ -132,7 +133,7 @@ def get_deliveries(
 
     return result
 
-@router.patch("/{delivery_id}/status")
+@router.patch("/{delivery_id}/status", dependencies=[Depends(require_permission("deliveries:write"))])
 def update_delivery_status(
     delivery_id: int,
     data: dict = Body(...),

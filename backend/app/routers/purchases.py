@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.purchase import Purchase, PurchaseItem
 from app.models.product import Product
@@ -20,7 +21,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("purchases:write"))])
 def create_purchase(
     data: PurchaseCreate,
     db: Session = Depends(get_db)
@@ -155,7 +156,7 @@ def create_purchase(
         "status": purchase.status
     }
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("purchases:read"))])
 def get_purchases(
     from_date: date | None = Query(
         default=None,
@@ -244,7 +245,7 @@ def get_purchases(
         }
         for purchase in purchases
     ]
-@router.get("/{purchase_id}")
+@router.get("/{purchase_id}", dependencies=[Depends(require_permission("purchases:read"))])
 def get_purchase(
     purchase_id: int,
     db: Session = Depends(get_db)
@@ -310,7 +311,7 @@ def get_purchase(
         ]
     }
 
-@router.patch("/{purchase_id}/status")
+@router.patch("/{purchase_id}/status", dependencies=[Depends(require_permission("purchases:write"))])
 def update_purchase_status(
     purchase_id: int,
     data: dict = Body(...),
@@ -411,7 +412,7 @@ def update_purchase_status(
     }
 
 
-@router.patch("/{purchase_id}/receive")
+@router.patch("/{purchase_id}/receive", dependencies=[Depends(require_permission("purchases:write"))])
 def receive_purchase_items(
     purchase_id: int,
     data: PurchaseReceive,

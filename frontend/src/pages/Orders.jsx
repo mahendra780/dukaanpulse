@@ -8,6 +8,7 @@ import Modal from "../components/Modal";
 import ProductPackagingSelect from "../components/ProductPackagingSelect";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 const emptyItem = () => ({ product_id: "", packaging_id: "", quantity: "" });
@@ -151,6 +152,7 @@ export default function Orders() {
   const [busy, setBusy] = useState(null); // { id, status } of the row action in flight
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -210,9 +212,11 @@ export default function Orders() {
           <h1>Orders</h1>
           <p>{orders.length} order{orders.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={activeCustomers.length === 0 || activeProducts.length === 0}>
-          <Plus size={15} /> New order
-        </button>
+        {can("orders:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={activeCustomers.length === 0 || activeProducts.length === 0}>
+            <Plus size={15} /> New order
+          </button>
+        )}
       </div>
 
       <div className="table-toolbar">
@@ -261,7 +265,7 @@ export default function Orders() {
                     <td><StatusBadge status={o.status} /></td>
                     <td>
                       <div className="section-actions">
-                        {(NEXT_STATUS[o.status] || []).map(([next, label]) => (
+                        {can("orders:write") && (NEXT_STATUS[o.status] || []).map(([next, label]) => (
                           <button
                             key={next}
                             className={next === "CANCELLED" ? "btn btn-ghost" : "btn btn-secondary"}

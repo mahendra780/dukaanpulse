@@ -5,6 +5,7 @@ import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 const PAYMENT_METHODS = ["CASH", "UPI", "BANK_TRANSFER", "CHEQUE"];
@@ -109,6 +110,7 @@ export default function PurchasePayments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -148,9 +150,11 @@ export default function PurchasePayments() {
           <h1>Supplier payments</h1>
           <p>{payments.length} payment{payments.length === 1 ? "" : "s"} to suppliers</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={payablePurchases.length === 0}>
-          <Plus size={15} /> Record payment
-        </button>
+        {can("purchase_payments:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={payablePurchases.length === 0}>
+            <Plus size={15} /> Record payment
+          </button>
+        )}
       </div>
       {payablePurchases.length === 0 && !loading && (
         <p className="muted" style={{ marginTop: -10 }}>No purchases currently have a balance due.</p>

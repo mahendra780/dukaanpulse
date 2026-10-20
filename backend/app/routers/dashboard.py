@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, extract,case
 from sqlalchemy.orm import Session, aliased
 from datetime import date
+from app.core.permissions import require_permission
 from app.db.database import get_db
 
 from app.models.product import Product
@@ -24,7 +25,8 @@ router = APIRouter(
 
 @router.get(
     "/summary",
-    response_model=DashboardSummaryResponse
+    response_model=DashboardSummaryResponse,
+    dependencies=[Depends(require_permission("dashboard:read"))],
 )
 def get_dashboard_summary(
     db: Session = Depends(get_db)
@@ -89,7 +91,7 @@ def get_dashboard_summary(
             current_inventory_items
         )
     )
-@router.get("/sales")
+@router.get("/sales", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_sales_dashboard(
     year: int = Query(..., description="Year (Example: 2026)"),
     db: Session = Depends(get_db)
@@ -136,7 +138,7 @@ def get_sales_dashboard(
     return result
 
 
-@router.get("/sales/daily")
+@router.get("/sales/daily", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_daily_sales(
     sales_date: date = Query(..., description="YYYY-MM-DD"),
     db: Session = Depends(get_db)
@@ -177,7 +179,7 @@ def get_daily_sales(
             for invoice in invoices
         ]
     }
-@router.get("/purchases")
+@router.get("/purchases", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_purchase_dashboard(
     year: int = Query(..., description="Year (Example: 2026)"),
     db: Session = Depends(get_db)
@@ -223,7 +225,7 @@ def get_purchase_dashboard(
         })
 
     return result
-@router.get("/top-products")
+@router.get("/top-products", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_top_products(
     limit: int = Query(10, ge=1, le=20),
     db: Session = Depends(get_db)
@@ -304,7 +306,7 @@ def get_top_products(
         }
         for index, row in enumerate(products)
     ]
-@router.get("/low-stock")
+@router.get("/low-stock", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_low_stock_products(
     threshold: int = Query(
         100,
@@ -373,7 +375,7 @@ def get_low_stock_products(
         }
         for row in products
     ]
-@router.get("/payment-summary")
+@router.get("/payment-summary", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_payment_summary(
     db: Session = Depends(get_db)
 ):

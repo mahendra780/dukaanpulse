@@ -1,5 +1,21 @@
 import { api } from "./client";
 
+// ---- Authentication ----
+export const login = (username, password) => {
+  const data = new URLSearchParams({ username, password });
+  return api.post("/auth/login", data, {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  }).then((r) => r.data);
+};
+export const getCurrentUser = () => api.get("/auth/me").then((r) => r.data);
+export const changePassword = (data) => api.post("/auth/change-password", data).then((r) => r.data);
+
+// ---- User management ----
+export const listUsers = () => api.get("/users").then((r) => r.data);
+export const createUser = (data) => api.post("/users", data).then((r) => r.data);
+export const updateUser = (id, data) => api.patch(`/users/${id}`, data).then((r) => r.data);
+export const resetUserPassword = (id, data) => api.post(`/users/${id}/reset-password`, data).then((r) => r.data);
+
 // ---- Dashboard / analytics ----
 export const getDashboardSummary = () => api.get("/dashboard/summary").then((r) => r.data);
 export const getSalesByMonth = (year) => api.get("/dashboard/sales", { params: { year } }).then((r) => r.data);
@@ -11,6 +27,7 @@ export const getDailySales = (sales_date) => api.get("/dashboard/sales/daily", {
 
 // ---- Categories ----
 export const listCategories = () => api.get("/categories/").then((r) => r.data);
+export const createCategory = (data) => api.post("/categories/", data).then((r) => r.data);
 
 // ---- Products ----
 export const listProducts = (search) => api.get("/products/", { params: { search } }).then((r) => r.data);

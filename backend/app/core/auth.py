@@ -55,4 +55,9 @@ def get_current_user(
             "Your session is no longer active. Please sign in again."
         )
 
+    if payload["token_version"] != (user.token_version or 0):
+        raise _authentication_error(
+            "Your session is no longer valid. Please sign in again."
+        )
+
     return user

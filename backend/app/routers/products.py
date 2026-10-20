@@ -4,6 +4,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.packaging import ProductPackaging
 from app.models.product import Product
@@ -17,7 +18,7 @@ router = APIRouter(
 )
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("products:read"))])
 def get_products(
     search: str | None = Query(
         default=None,
@@ -98,7 +99,7 @@ def get_products(
     return result
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("products:write"))])
 def create_product(
     data: ProductCreate,
     db: Session = Depends(get_db)
@@ -162,7 +163,7 @@ def create_product(
     }
 
 
-@router.get("/{product_id}")
+@router.get("/{product_id}", dependencies=[Depends(require_permission("products:read"))])
 def get_product(
     product_id: int,
     db: Session = Depends(get_db)
@@ -227,7 +228,7 @@ def get_product(
             for packaging in product.packaging
         ]
     }
-@router.patch("/{product_id}")
+@router.patch("/{product_id}", dependencies=[Depends(require_permission("products:write"))])
 def update_product(
     product_id: int,
     data: ProductUpdate,

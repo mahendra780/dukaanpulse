@@ -3,6 +3,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.customer import Customer
 from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
@@ -14,7 +15,7 @@ router = APIRouter(
 )
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("customers:read"))])
 def get_customers(
     search: str | None = Query(
         default=None,
@@ -68,7 +69,8 @@ def get_customers(
 @router.post(
     "/",
     response_model=CustomerResponse,
-    status_code=201
+    status_code=201,
+    dependencies=[Depends(require_permission("customers:write"))],
 )
 def create_customer(
     data: CustomerCreate,
@@ -96,7 +98,7 @@ def create_customer(
         raise HTTPException(status_code=500, detail="Unable to create customer")
 
     return customer
-@router.get("/{customer_id}")
+@router.get("/{customer_id}", dependencies=[Depends(require_permission("customers:read"))])
 def get_customer(
     customer_id: int,
     db: Session = Depends(get_db)
@@ -135,7 +137,7 @@ def get_customer(
             for order in customer.orders
         ]
     }
-@router.patch("/{customer_id}")
+@router.patch("/{customer_id}", dependencies=[Depends(require_permission("customers:write"))])
 def update_customer(
     customer_id: int,
     data: CustomerUpdate,

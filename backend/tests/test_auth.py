@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from app.core.auth import get_current_user
 from app.core.config import settings
+from app.core.permissions import permissions_for_role
 from app.core.roles import USER_STATUSES
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
@@ -146,6 +147,7 @@ class AuthenticationEndpointTests(unittest.TestCase):
                 "full_name": "Active Administrator",
                 "role": "ADMIN",
                 "status": "ACTIVE",
+                "permissions": permissions_for_role("ADMIN"),
             },
         )
 
@@ -168,6 +170,7 @@ class AuthenticationEndpointTests(unittest.TestCase):
                 "sub": "1",
                 "iat": now - timedelta(minutes=2),
                 "exp": now - timedelta(minutes=1),
+                "token_version": 0,
             },
             settings.JWT_SECRET_KEY,
             algorithm=settings.ALGORITHM,
@@ -212,6 +215,7 @@ class AuthenticationEndpointTests(unittest.TestCase):
             verify_password("new-secure-password", self.active_user.password_hash)
         )
         self.assertFalse(verify_password("current-password", self.active_user.password_hash))
+        self.assertEqual(self.active_user.token_version, 1)
         self.assertEqual(self.db.commit_count, 1)
 
     def test_change_password_rejects_each_invalid_request(self):

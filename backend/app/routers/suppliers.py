@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.supplier import Supplier
 from app.schemas.supplier import (
@@ -16,7 +17,7 @@ router = APIRouter(
     tags=["Suppliers"]
 )
 
-@router.get("/", response_model=list[SupplierResponse])
+@router.get("/", response_model=list[SupplierResponse], dependencies=[Depends(require_permission("suppliers:read"))])
 def get_suppliers(db: Session = Depends(get_db)):
     result = db.execute(
         select(Supplier).order_by(Supplier.supplier_id)
@@ -27,6 +28,7 @@ def get_suppliers(db: Session = Depends(get_db)):
     "/",
     response_model=SupplierResponse,
     status_code=201,
+    dependencies=[Depends(require_permission("suppliers:write"))],
 )
 def create_supplier(
     data: SupplierCreate,
@@ -67,7 +69,7 @@ def create_supplier(
             detail="Unable to create supplier."
         )
 
-@router.get("/{supplier_id}", response_model=SupplierResponse)
+@router.get("/{supplier_id}", response_model=SupplierResponse, dependencies=[Depends(require_permission("suppliers:read"))])
 def get_supplier(
     supplier_id: int,
     db: Session = Depends(get_db),
@@ -82,7 +84,7 @@ def get_supplier(
 
     return supplier
 
-@router.patch("/{supplier_id}")
+@router.patch("/{supplier_id}", dependencies=[Depends(require_permission("suppliers:write"))])
 def update_supplier(
     supplier_id: int,
     data: SupplierUpdate,
@@ -133,5 +135,4 @@ def update_supplier(
             status_code=500,
             detail="Unable to update supplier."
         )
-
 

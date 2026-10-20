@@ -28,7 +28,7 @@ TEST_DATABASE_URL = "postgresql+psycopg://test:test@localhost/test"
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
 
 
-def _run_import(module: str, extra_environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _run_python(statement: str, extra_environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
     environment = {
         "DATABASE_URL": TEST_DATABASE_URL,
         "PATH": os.environ["PATH"],
@@ -41,7 +41,7 @@ def _run_import(module: str, extra_environment: dict[str, str]) -> subprocess.Co
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         return subprocess.run(
-            [sys.executable, "-c", f"import {module}"],
+            [sys.executable, "-c", statement],
             cwd=temporary_directory,
             env=environment,
             capture_output=True,
@@ -80,6 +80,7 @@ class AccessTokenSecurityTests(unittest.TestCase):
                 "sub": "123",
                 "iat": now - timedelta(minutes=2),
                 "exp": now - timedelta(minutes=1),
+                "token_version": 0,
             },
             settings.JWT_SECRET_KEY,
             algorithm=settings.ALGORITHM,
@@ -102,6 +103,7 @@ class AccessTokenSecurityTests(unittest.TestCase):
                 "sub": "123",
                 "iat": now,
                 "exp": now + timedelta(minutes=1),
+                "token_version": 0,
             },
             "different-test-jwt-secret-key-that-is-long-enough",
             algorithm=settings.ALGORITHM,
@@ -117,21 +119,32 @@ class AccessTokenSecurityTests(unittest.TestCase):
 
 class SettingsSecurityTests(unittest.TestCase):
     def test_missing_jwt_secret_key_is_rejected(self):
-        result = _run_import("app.main", {})
+        result = _run_python("import app.main", {})
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("JWT_SECRET_KEY", result.stderr)
 
     def test_short_jwt_secret_key_is_rejected(self):
-        result = _run_import("app.main", {"JWT_SECRET_KEY": "too-short"})
+        result = _run_python("import app.main", {"JWT_SECRET_KEY": "too-short"})
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("JWT_SECRET_KEY", result.stderr)
 
     def test_application_imports_with_a_valid_jwt_secret_key(self):
-        result = _run_import(
-            "app.main",
+        result = _run_python(
+            "import app.main",
             {"JWT_SECRET_KEY": "test-jwt-secret-key-that-is-long-enough"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_disables_api_documentation_routes(self):
+        result = _run_python(
+            "from app.main import app; assert app.docs_url is None; assert app.redoc_url is None; assert app.openapi_url is None",
+            {
+                "JWT_SECRET_KEY": "test-jwt-secret-key-that-is-long-enough",
+                "ENVIRONMENT": "production",
+            },
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)

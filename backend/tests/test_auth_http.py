@@ -9,6 +9,7 @@ import jwt
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from app.core.permissions import permissions_for_role
 from app.core.roles import USER_STATUSES
 from app.core.security import create_access_token, hash_password
 from app.db.database import get_db
@@ -136,6 +137,7 @@ class AuthenticationHttpTests(unittest.TestCase):
                 "full_name": "Active Administrator",
                 "role": "ADMIN",
                 "status": "ACTIVE",
+                "permissions": permissions_for_role("ADMIN"),
             },
         )
 
@@ -159,6 +161,7 @@ class AuthenticationHttpTests(unittest.TestCase):
                 "sub": "1",
                 "iat": now - timedelta(minutes=2),
                 "exp": now - timedelta(minutes=1),
+                "token_version": 0,
             },
             settings.JWT_SECRET_KEY,
             algorithm=settings.ALGORITHM,
@@ -178,6 +181,7 @@ class AuthenticationHttpTests(unittest.TestCase):
                 "sub": "1",
                 "iat": now,
                 "exp": now + timedelta(minutes=1),
+                "token_version": 0,
             },
             "different-test-jwt-secret-key-that-is-long-enough",
             algorithm=settings.ALGORITHM,
@@ -197,6 +201,7 @@ class AuthenticationHttpTests(unittest.TestCase):
                 "sub": "not-a-user-id",
                 "iat": now,
                 "exp": now + timedelta(minutes=1),
+                "token_version": 0,
             },
             settings.JWT_SECRET_KEY,
             algorithm=settings.ALGORITHM,
@@ -226,9 +231,10 @@ class AuthenticationHttpTests(unittest.TestCase):
         self._assert_bearer_unauthorized(response)
 
     def test_change_password_success_invalidates_the_old_password(self):
+        headers = self._headers_for()
         response = self.client.post(
             "/auth/change-password",
-            headers=self._headers_for(),
+            headers=headers,
             json={
                 "current_password": "current-password",
                 "new_password": "changed-password",
@@ -239,6 +245,9 @@ class AuthenticationHttpTests(unittest.TestCase):
         self.assertEqual(response.json(), {"message": "Password changed successfully."})
         self.assertEqual(self._login("Admin", "current-password").status_code, 401)
         self.assertEqual(self._login("Admin", "changed-password").status_code, 200)
+        self._assert_bearer_unauthorized(
+            self.client.get("/auth/me", headers=headers)
+        )
 
     def test_change_password_with_a_wrong_current_password_returns_bad_request(self):
         response = self.client.post(

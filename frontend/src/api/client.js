@@ -1,10 +1,77 @@
 import axios from "axios";
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const ACCESS_TOKEN_KEY = "dukaanpulse.accessToken";
+const POST_LOGIN_PATH_KEY = "dukaanpulse.postLoginPath";
+
+let unauthorizedHandler = null;
 
 // A timeout means a hung request ends in a clear message instead of a
 // loading state that never finishes.
 export const api = axios.create({ baseURL, timeout: 30000 });
+
+export function getStoredToken() {
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function storeToken(token) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, token);
+}
+
+export function clearStoredSession() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+}
+
+export function getPostLoginPath() {
+  return sessionStorage.getItem(POST_LOGIN_PATH_KEY);
+}
+
+export function clearPostLoginPath() {
+  sessionStorage.removeItem(POST_LOGIN_PATH_KEY);
+}
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
+
+  return () => {
+    if (unauthorizedHandler === handler) unauthorizedHandler = null;
+  };
+}
+
+function isLoginRequest(config) {
+  const url = config?.url?.split("?")[0]?.replace(/\/+$/, "");
+  return config?.method?.toLowerCase() === "post" && url === "/auth/login";
+}
+
+function rememberCurrentPath() {
+  const path = window.location.pathname + window.location.search + window.location.hash;
+  sessionStorage.setItem(POST_LOGIN_PATH_KEY, path);
+}
+
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (
+      error?.response?.status === 401 &&
+      !isLoginRequest(error.config) &&
+      window.location.pathname !== "/login"
+    ) {
+      rememberCurrentPath();
+      clearStoredSession();
+      unauthorizedHandler?.();
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 const STATUS_FALLBACKS = {
   400: "The information provided is not valid. Please check your details and try again.",

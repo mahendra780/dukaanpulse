@@ -3,6 +3,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.purchase import Purchase
 from app.models.purchase_payment import PurchasePayment
@@ -14,7 +15,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("purchase_payments:write"))])
 def create_purchase_payment(
     data: PurchasePaymentCreate,
     db: Session = Depends(get_db)
@@ -88,7 +89,7 @@ def create_purchase_payment(
     }
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("purchase_payments:read"))])
 def get_purchase_payments(
     db: Session = Depends(get_db)
 ):

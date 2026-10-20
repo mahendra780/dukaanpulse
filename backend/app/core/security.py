@@ -40,7 +40,7 @@ def verify_password_against_dummy(password: str) -> None:
     password_hasher.verify(password, _dummy_password_hash)
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, token_version: int = 0) -> str:
     issued_at = datetime.now(timezone.utc)
     expires_at = issued_at + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -51,6 +51,7 @@ def create_access_token(user_id: int) -> str:
             "sub": str(user_id),
             "iat": issued_at,
             "exp": expires_at,
+            "token_version": token_version,
         },
         settings.JWT_SECRET_KEY,
         algorithm=settings.ALGORITHM,
@@ -63,7 +64,7 @@ def decode_access_token(token: str) -> dict[str, object]:
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
+            options={"require": ["sub", "iat", "exp", "token_version"]},
         )
     except ExpiredSignatureError as exc:
         raise ExpiredAccessTokenError("Access token has expired.") from exc
@@ -80,5 +81,13 @@ def decode_access_token(token: str) -> dict[str, object]:
     subject = payload.get("sub")
     if not isinstance(subject, str) or not subject:
         raise MalformedAccessTokenError("Access token has an invalid subject claim.")
+
+    token_version = payload.get("token_version")
+    if (
+        not isinstance(token_version, int)
+        or isinstance(token_version, bool)
+        or token_version < 0
+    ):
+        raise MalformedAccessTokenError("Access token has an invalid token version.")
 
     return payload

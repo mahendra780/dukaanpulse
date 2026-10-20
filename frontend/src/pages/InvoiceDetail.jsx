@@ -6,6 +6,7 @@ import { Spinner, ErrorBanner, EmptyState } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -19,6 +20,7 @@ export default function InvoiceDetail() {
   const [applyingCredit, setApplyingCredit] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -73,8 +75,8 @@ export default function InvoiceDetail() {
   const totalPaid = invoice.payments.reduce((s, p) => s + Number(p.amount), 0);
   const remaining = Number(invoice.total_amount) - totalPaid;
 
-  const canCancel = invoice.status === "UNPAID" && !invoice.delivery;
-  const canApplyCredit = remaining > 0 && invoice.status !== "CANCELLED" && Number(invoice.customer_credit_balance) > 0;
+  const canCancel = can("invoices:write") && invoice.status === "UNPAID" && !invoice.delivery;
+  const canApplyCredit = can("payments:write") && remaining > 0 && invoice.status !== "CANCELLED" && Number(invoice.customer_credit_balance) > 0;
   const creditToApply = Math.min(remaining, Number(invoice.customer_credit_balance || 0));
   const cancelledDeliveryCount = (invoice.deliveries || []).filter((d) => d.status === "CANCELLED").length;
 
@@ -183,7 +185,7 @@ export default function InvoiceDetail() {
               </button>
             </div>
           )}
-          {remaining > 0 && invoice.status !== "CANCELLED" && (
+          {can("payments:write") && remaining > 0 && invoice.status !== "CANCELLED" && (
             <Link to="/payments" className="btn btn-secondary" style={{ marginTop: 12 }}>Record a payment</Link>
           )}
         </div>
@@ -197,12 +199,16 @@ export default function InvoiceDetail() {
               <p style={{ margin: "4px 0" }}>{invoice.delivery.delivery_address}</p>
               {invoice.delivery.vehicle_number && <p className="muted" style={{ margin: "4px 0" }}>Vehicle: {invoice.delivery.vehicle_number}</p>}
               {invoice.delivery.driver_name && <p className="muted" style={{ margin: "4px 0" }}>Driver: {invoice.delivery.driver_name}</p>}
-              <Link to="/deliveries" className="btn btn-secondary" style={{ marginTop: 8 }}>Manage delivery</Link>
+              {can("deliveries:read") && (
+                <Link to="/deliveries" className="btn btn-secondary" style={{ marginTop: 8 }}>Manage delivery</Link>
+              )}
             </div>
           ) : (
             <>
               <EmptyState label="No active delivery for this invoice yet." />
-              <Link to="/deliveries" className="btn btn-secondary">Create delivery</Link>
+              {can("deliveries:write") && (
+                <Link to="/deliveries" className="btn btn-secondary">Create delivery</Link>
+              )}
             </>
           )}
           {cancelledDeliveryCount > 0 && (

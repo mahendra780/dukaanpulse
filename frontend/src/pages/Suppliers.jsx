@@ -7,6 +7,7 @@ import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 function CreateSupplierModal({ onClose, onCreated }) {
@@ -75,6 +76,7 @@ export default function Suppliers() {
   const [busyId, setBusyId] = useState(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -118,9 +120,11 @@ export default function Suppliers() {
           <h1>Suppliers</h1>
           <p>{suppliers.length} supplier{suppliers.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={15} /> Add supplier
-        </button>
+        {can("suppliers:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <Plus size={15} /> Add supplier
+          </button>
+        )}
       </div>
 
       <ErrorBanner message={error} />
@@ -151,11 +155,13 @@ export default function Suppliers() {
                   <td className="num">{s.payment_terms_days}</td>
                   <td><StatusBadge status={s.status} /></td>
                   <td>
-                    <button className="btn btn-ghost" disabled={busyId === s.supplier_id} onClick={() => toggleStatus(s)}>
-                      {busyId === s.supplier_id
-                        ? (s.status === "ACTIVE" ? "Deactivating…" : "Activating…")
-                        : (s.status === "ACTIVE" ? "Deactivate" : "Activate")}
-                    </button>
+                    {can("suppliers:write") && (
+                      <button className="btn btn-ghost" disabled={busyId === s.supplier_id} onClick={() => toggleStatus(s)}>
+                        {busyId === s.supplier_id
+                          ? (s.status === "ACTIVE" ? "Deactivating…" : "Activating…")
+                          : (s.status === "ACTIVE" ? "Deactivate" : "Activate")}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

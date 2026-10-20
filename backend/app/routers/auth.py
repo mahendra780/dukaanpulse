@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.config import settings
+from app.core.permissions import permissions_for_role
 from app.core.roles import USER_STATUSES
 from app.core.security import (
     create_access_token,
@@ -77,7 +78,10 @@ def login(
         ) from exc
 
     return {
-        "access_token": create_access_token(user.user_id),
+        "access_token": create_access_token(
+            user.user_id,
+            user.token_version or 0,
+        ),
         "token_type": "bearer",
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
@@ -85,7 +89,14 @@ def login(
 
 @router.get("/me", response_model=CurrentUserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    return {
+        "user_id": current_user.user_id,
+        "username": current_user.username,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+        "status": current_user.status,
+        "permissions": permissions_for_role(current_user.role),
+    }
 
 
 @router.post("/change-password", response_model=MessageResponse)
@@ -120,6 +131,7 @@ def change_password(
 
     try:
         current_user.password_hash = hash_password(data.new_password)
+        current_user.token_version = (current_user.token_version or 0) + 1
         db.commit()
     except HTTPException:
         db.rollback()

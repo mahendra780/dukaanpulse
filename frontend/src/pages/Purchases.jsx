@@ -8,6 +8,7 @@ import Modal from "../components/Modal";
 import ProductPackagingSelect from "../components/ProductPackagingSelect";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 const emptyItem = () => ({ product_id: "", packaging_id: "", quantity: "", unit_price: "", discount: "", tax: "" });
@@ -225,6 +226,7 @@ export default function Purchases() {
   const [busy, setBusy] = useState(null); // { id, status } of the row action in flight
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -286,9 +288,11 @@ export default function Purchases() {
           <h1>Purchases</h1>
           <p>{purchases.length} purchase{purchases.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={activeSuppliers.length === 0 || activeProducts.length === 0}>
-          <Plus size={15} /> New purchase
-        </button>
+        {can("purchases:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={activeSuppliers.length === 0 || activeProducts.length === 0}>
+            <Plus size={15} /> New purchase
+          </button>
+        )}
       </div>
 
       <div className="table-toolbar">
@@ -337,7 +341,7 @@ export default function Purchases() {
                     <td className="num">₹{p.total_amount.toLocaleString("en-IN")}</td>
                     <td><StatusBadge status={p.status} /></td>
                     <td>
-                      {(p.status === "PENDING" || p.status === "PARTIALLY_RECEIVED") && (
+                      {can("purchases:write") && (p.status === "PENDING" || p.status === "PARTIALLY_RECEIVED") && (
                         <div className="section-actions">
                           <button className="btn btn-secondary" disabled={rowBusy} onClick={() => setReceivingId(p.purchase_id)}>Receive items…</button>
                           <button className="btn btn-secondary" disabled={rowBusy} onClick={() => transition(p, "RECEIVED")}>

@@ -7,6 +7,7 @@ import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 
@@ -159,6 +160,7 @@ export default function Returns() {
   const [busy, setBusy] = useState(null); 
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -220,9 +222,11 @@ export default function Returns() {
           <h1>Returns</h1>
           <p>{returns.length} return{returns.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={returnableInvoices.length === 0}>
-          <Plus size={15} /> New return
-        </button>
+        {can("returns:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={returnableInvoices.length === 0}>
+            <Plus size={15} /> New return
+          </button>
+        )}
       </div>
 
       <ErrorBanner message={error} />
@@ -256,12 +260,12 @@ export default function Returns() {
                     <td><StatusBadge status={r.status} /></td>
                     <td>
                       <div className="section-actions">
-                        {r.status === "REQUESTED" && (
+                        {can("returns:approve") && r.status === "REQUESTED" && (
                           <button className="btn btn-secondary" disabled={rowBusy} onClick={() => handleApprove(r)}>
                             {rowBusy && busy.action === "approve" ? "Approving…" : "Approve"}
                           </button>
                         )}
-                        {r.status === "APPROVED" && (
+                        {can("returns:receive") && r.status === "APPROVED" && (
                           <button className="btn btn-secondary" disabled={rowBusy} onClick={() => handleReceive(r)}>
                             {rowBusy && busy.action === "receive" ? "Receiving…" : "Receive"}
                           </button>

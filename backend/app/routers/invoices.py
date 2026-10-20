@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.delivery import Delivery
 from app.models.invoice import Invoice, InvoiceItem
@@ -20,7 +21,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("invoices:write"))])
 def create_invoice(
     data: InvoiceCreate,
     db: Session = Depends(get_db)
@@ -199,7 +200,7 @@ def create_invoice(
     }
 
 
-@router.patch("/{invoice_id}/status")
+@router.patch("/{invoice_id}/status", dependencies=[Depends(require_permission("invoices:write"))])
 def cancel_invoice(
     invoice_id: int,
     data: dict = Body(...),
@@ -285,7 +286,7 @@ def cancel_invoice(
     }
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("invoices:read"))])
 def get_invoices(
     db: Session = Depends(get_db)
 ):
@@ -348,7 +349,7 @@ def get_invoices(
         })
 
     return result
-@router.get("/{invoice_id}")
+@router.get("/{invoice_id}", dependencies=[Depends(require_permission("invoices:read"))])
 def get_invoice(
     invoice_id: int,
     db: Session = Depends(get_db)

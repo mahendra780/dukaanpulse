@@ -1,15 +1,78 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, Search } from "lucide-react";
-import { listProducts, listCategories, createProduct, updateProduct } from "../api/endpoints";
+import { listProducts, listCategories, createCategory, createProduct, updateProduct } from "../api/endpoints";
 import { extractErrorMessage } from "../api/client";
 import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 const emptyPackaging = () => ({ unit_name: "", conversion_to_base: 1, is_base_unit: false, is_purchase_unit: false, is_sale_unit: false });
+
+function CreateCategoryModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({ category_name: "", status: "ACTIVE" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSaving(true);
+
+    try {
+      await createCategory(form);
+      toast.success(successMessage("Category", "added"));
+      onCreated();
+    } catch (requestError) {
+      setError(extractErrorMessage(requestError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Add category" onClose={onClose}>
+      <form onSubmit={submit}>
+        <ErrorBanner message={error} />
+        <div className="field">
+          <label>Category name</label>
+          <input
+            value={form.category_name}
+            onChange={(event) => setForm({ ...form, category_name: event.target.value })}
+            minLength={1}
+            maxLength={100}
+            required
+            autoFocus
+            disabled={saving}
+          />
+        </div>
+        <div className="field">
+          <label>Status</label>
+          <select
+            value={form.status}
+            onChange={(event) => setForm({ ...form, status: event.target.value })}
+            disabled={saving}
+          >
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="INACTIVE">INACTIVE</option>
+          </select>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? "Adding..." : "Add category"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 function CreateProductModal({ categories, onClose, onCreated }) {
   const [form, setForm] = useState({ product_name: "", brand_name: "", sku: "", category_id: categories[0]?.category_id ?? "", status: "ACTIVE" });
@@ -109,9 +172,11 @@ export default function Products() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateCategory, setShowCreateCategory] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -162,9 +227,18 @@ export default function Products() {
           <h1>Products</h1>
           <p>{products.length} product{products.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={categories.length === 0}>
-          <Plus size={15} /> Add product
-        </button>
+        <div className="section-actions">
+          {can("categories:write") && (
+            <button className="btn btn-secondary" onClick={() => setShowCreateCategory(true)}>
+              <Plus size={15} /> Add category
+            </button>
+          )}
+          {can("products:write") && (
+            <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={categories.length === 0}>
+              <Plus size={15} /> Add product
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="table-toolbar">
@@ -208,11 +282,13 @@ export default function Products() {
                   <td className="num">{p.current_stock} {p.base_unit}</td>
                   <td><StatusBadge status={p.status} /></td>
                   <td>
-                    <button className="btn btn-ghost" disabled={busyId === p.product_id} onClick={() => toggleStatus(p)}>
-                      {busyId === p.product_id
-                        ? (p.status === "ACTIVE" ? "Deactivating…" : "Activating…")
-                        : (p.status === "ACTIVE" ? "Deactivate" : "Activate")}
-                    </button>
+                    {can("products:write") && (
+                      <button className="btn btn-ghost" disabled={busyId === p.product_id} onClick={() => toggleStatus(p)}>
+                        {busyId === p.product_id
+                          ? (p.status === "ACTIVE" ? "Deactivating…" : "Activating…")
+                          : (p.status === "ACTIVE" ? "Deactivate" : "Activate")}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -227,6 +303,16 @@ export default function Products() {
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
+            load();
+          }}
+        />
+      )}
+
+      {showCreateCategory && (
+        <CreateCategoryModal
+          onClose={() => setShowCreateCategory(false)}
+          onCreated={() => {
+            setShowCreateCategory(false);
             load();
           }}
         />

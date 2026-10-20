@@ -7,6 +7,7 @@ import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
 import { successMessage } from "../lib/messages";
 
 function CreateCustomerModal({ onClose, onCreated }) {
@@ -81,6 +82,7 @@ export default function Customers() {
   const [busyId, setBusyId] = useState(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = useAuth();
 
   const load = () => {
     setLoading(true);
@@ -128,9 +130,11 @@ export default function Customers() {
           <h1>Customers</h1>
           <p>{customers.length} customer{customers.length === 1 ? "" : "s"}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={15} /> Add customer
-        </button>
+        {can("customers:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <Plus size={15} /> Add customer
+          </button>
+        )}
       </div>
 
       <div className="table-toolbar">
@@ -185,11 +189,13 @@ export default function Customers() {
                   <td className="num">{c.payment_terms_days}</td>
                   <td><StatusBadge status={c.status} /></td>
                   <td>
-                    <button className="btn btn-ghost" disabled={busyId === c.customer_id} onClick={() => toggleStatus(c)}>
-                      {busyId === c.customer_id
-                        ? (c.status === "ACTIVE" ? "Deactivating…" : "Activating…")
-                        : (c.status === "ACTIVE" ? "Deactivate" : "Activate")}
-                    </button>
+                    {can("customers:write") && (
+                      <button className="btn btn-ghost" disabled={busyId === c.customer_id} onClick={() => toggleStatus(c)}>
+                        {busyId === c.customer_id
+                          ? (c.status === "ACTIVE" ? "Deactivating…" : "Activating…")
+                          : (c.status === "ACTIVE" ? "Deactivate" : "Activate")}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

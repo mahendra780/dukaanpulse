@@ -70,3 +70,15 @@ class User(Base):
         default=0,
         server_default=text("0"),
     )
+
+    failed_login_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )

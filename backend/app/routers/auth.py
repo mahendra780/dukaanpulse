@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -47,19 +47,53 @@ def login(
 ):
     username = form_data.username.strip()
     user = db.execute(
-        select(User).where(func.lower(User.username) == username.lower())
+        select(User)
+        .where(func.lower(User.username) == username.lower())
+        .with_for_update()
     ).scalar_one_or_none()
 
     if user is None:
         verify_password_against_dummy(form_data.password)
         raise _invalid_credentials_error()
 
+    now = datetime.now(timezone.utc)
+    if user.locked_until is not None and user.locked_until > now:
+        verify_password_against_dummy(form_data.password)
+        raise _invalid_credentials_error()
+
     password_is_valid = verify_password(form_data.password, user.password_hash)
-    if not password_is_valid or user.status != USER_STATUSES[0]:
+    if not password_is_valid:
+        if user.status == USER_STATUSES[0]:
+            user.failed_login_count = (user.failed_login_count or 0) + 1
+            if user.failed_login_count >= settings.FAILED_LOGIN_ATTEMPT_THRESHOLD:
+                user.locked_until = now + timedelta(
+                    minutes=settings.LOGIN_LOCKOUT_MINUTES
+                )
+
+            try:
+                db.commit()
+            except IntegrityError as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Unable to sign in right now. Please try again.",
+                ) from exc
+            except SQLAlchemyError as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Unable to sign in right now. Please try again.",
+                ) from exc
+
+        raise _invalid_credentials_error()
+
+    if user.status != USER_STATUSES[0]:
         raise _invalid_credentials_error()
 
     try:
         user.last_login_at = datetime.now(timezone.utc)
+        user.failed_login_count = 0
+        user.locked_until = None
         db.commit()
     except HTTPException:
         db.rollback()

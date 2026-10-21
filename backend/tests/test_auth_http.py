@@ -65,6 +65,8 @@ class AuthenticationHttpTests(unittest.TestCase):
             password_hash=hash_password("current-password"),
             role="ADMIN",
             status=USER_STATUSES[0],
+            failed_login_count=0,
+            locked_until=None,
         )
         self.inactive_user = User(
             user_id=2,
@@ -73,6 +75,8 @@ class AuthenticationHttpTests(unittest.TestCase):
             password_hash=hash_password("current-password"),
             role="VIEWER",
             status=USER_STATUSES[1],
+            failed_login_count=0,
+            locked_until=None,
         )
         self.db = FakeSession([self.active_user, self.inactive_user])
 
@@ -123,6 +127,19 @@ class AuthenticationHttpTests(unittest.TestCase):
         self.assertEqual(inactive_user.status_code, wrong_password.status_code)
         self.assertEqual(unknown_username.json(), wrong_password.json())
         self.assertEqual(inactive_user.json(), wrong_password.json())
+
+    def test_locked_login_has_the_same_response_as_other_login_failures(self):
+        self.active_user.failed_login_count = settings.FAILED_LOGIN_ATTEMPT_THRESHOLD
+        self.active_user.locked_until = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.LOGIN_LOCKOUT_MINUTES
+        )
+
+        locked_user = self._login("Admin", "current-password")
+        unknown_user = self._login("unknown-user", "wrong-password")
+
+        self.assertEqual(locked_user.status_code, 401)
+        self.assertEqual(locked_user.json(), unknown_user.json())
+        self.assertEqual(self.db.commit_count, 0)
 
     def test_get_me_with_a_valid_token_returns_no_password_hash(self):
         response = self.client.get("/auth/me", headers=self._headers_for())

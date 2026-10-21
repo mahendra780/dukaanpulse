@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: Literal["HS256"] = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=480, gt=0)
+    FAILED_LOGIN_ATTEMPT_THRESHOLD: int = Field(default=5, ge=1)
+    LOGIN_LOCKOUT_MINUTES: int = Field(default=15, gt=0)
     ENVIRONMENT: Literal["development", "production"] = "development"
     CORS_ALLOWED_ORIGINS: str = _DEFAULT_CORS_ALLOWED_ORIGINS
 

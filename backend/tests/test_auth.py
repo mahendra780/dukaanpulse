@@ -67,6 +67,8 @@ class AuthenticationEndpointTests(unittest.TestCase):
             password_hash=hash_password("current-password"),
             role="ADMIN",
             status=USER_STATUSES[0],
+            failed_login_count=0,
+            locked_until=None,
         )
         self.inactive_user = User(
             user_id=2,
@@ -75,6 +77,8 @@ class AuthenticationEndpointTests(unittest.TestCase):
             password_hash=hash_password("current-password"),
             role="VIEWER",
             status=USER_STATUSES[1],
+            failed_login_count=0,
+            locked_until=None,
         )
         self.db = FakeSession([self.active_user, self.inactive_user])
 
@@ -104,6 +108,62 @@ class AuthenticationEndpointTests(unittest.TestCase):
         self.assertIsNotNone(self.active_user.last_login_at)
         self.assertEqual(self.db.commit_count, 1)
 
+    def test_failed_login_threshold_locks_an_active_user(self):
+        for attempt in range(1, settings.FAILED_LOGIN_ATTEMPT_THRESHOLD + 1):
+            error = self._login_error("Admin", "wrong-password")
+
+            self.assertEqual(error.status_code, 401)
+            self.assertEqual(error.detail, "Incorrect username or password.")
+            self.assertEqual(self.active_user.failed_login_count, attempt)
+            if attempt < settings.FAILED_LOGIN_ATTEMPT_THRESHOLD:
+                self.assertIsNone(self.active_user.locked_until)
+
+        self.assertIsNotNone(self.active_user.locked_until)
+        self.assertGreater(self.active_user.locked_until, datetime.now(timezone.utc))
+        self.assertEqual(
+            self.db.commit_count,
+            settings.FAILED_LOGIN_ATTEMPT_THRESHOLD,
+        )
+
+    def test_locked_account_rejects_a_correct_password_generically(self):
+        self.active_user.failed_login_count = settings.FAILED_LOGIN_ATTEMPT_THRESHOLD
+        self.active_user.locked_until = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.LOGIN_LOCKOUT_MINUTES
+        )
+
+        error = self._login_error("Admin", "current-password")
+
+        self.assertEqual(error.status_code, 401)
+        self.assertEqual(error.detail, "Incorrect username or password.")
+        self.assertEqual(
+            self.active_user.failed_login_count,
+            settings.FAILED_LOGIN_ATTEMPT_THRESHOLD,
+        )
+        self.assertEqual(self.db.commit_count, 0)
+
+    def test_expired_lock_allows_successful_login_and_resets_state(self):
+        self.active_user.failed_login_count = settings.FAILED_LOGIN_ATTEMPT_THRESHOLD
+        self.active_user.locked_until = datetime.now(timezone.utc) - timedelta(
+            seconds=1
+        )
+
+        response = self._login("Admin", "current-password")
+
+        self.assertEqual(response["token_type"], "bearer")
+        self.assertEqual(self.active_user.failed_login_count, 0)
+        self.assertIsNone(self.active_user.locked_until)
+        self.assertEqual(self.db.commit_count, 1)
+
+    def test_successful_login_resets_prior_failed_attempts(self):
+        self.active_user.failed_login_count = 2
+        self.active_user.locked_until = None
+
+        self._login("Admin", "current-password")
+
+        self.assertEqual(self.active_user.failed_login_count, 0)
+        self.assertIsNone(self.active_user.locked_until)
+        self.assertEqual(self.db.commit_count, 1)
+
     def test_unknown_username_response_matches_wrong_password_response(self):
         wrong_password_error = self._login_error("Admin", "wrong-password")
         unknown_username_error = self._login_error("unknown-user", "wrong-password")
@@ -124,6 +184,8 @@ class AuthenticationEndpointTests(unittest.TestCase):
             wrong_password_error.detail,
             "Incorrect username or password.",
         )
+        self.assertEqual(self.active_user.failed_login_count, 1)
+        self.assertEqual(self.db.commit_count, 1)
 
     def test_inactive_user_response_matches_wrong_password_response(self):
         wrong_password_error = self._login_error("Admin", "wrong-password")
@@ -131,6 +193,17 @@ class AuthenticationEndpointTests(unittest.TestCase):
 
         self.assertEqual(inactive_user_error.status_code, 401)
         self.assertEqual(inactive_user_error.detail, wrong_password_error.detail)
+        self.assertEqual(self.inactive_user.failed_login_count, 0)
+        self.assertIsNone(self.inactive_user.locked_until)
+
+    def test_unknown_user_does_not_change_known_user_lockout_state(self):
+        error = self._login_error("unknown-user", "wrong-password")
+
+        self.assertEqual(error.status_code, 401)
+        self.assertEqual(error.detail, "Incorrect username or password.")
+        self.assertEqual(self.active_user.failed_login_count, 0)
+        self.assertIsNone(self.active_user.locked_until)
+        self.assertEqual(self.db.commit_count, 0)
 
     def test_get_me_with_a_valid_token_returns_only_current_user_fields(self):
         current_user = get_current_user(

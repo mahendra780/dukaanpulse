@@ -103,6 +103,15 @@ class AuthenticationHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["WWW-Authenticate"], "Bearer")
 
+    def test_health_disables_demo_seeding_by_default(self):
+        response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"status": "healthy", "demo_seed_allowed": False},
+        )
+
     def test_login_success_uses_a_form_encoded_body(self):
         response = self._login("ADMIN", "current-password")
 

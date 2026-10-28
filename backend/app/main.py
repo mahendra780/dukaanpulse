@@ -20,6 +20,7 @@ from app.routers.payments import router as payments_router
 from app.routers.purchase_payments import router as purchase_payments_router
 from app.routers.returns import router as returns_router
 from app.routers.users import router as users_router
+from app.routers.reports import router as reports_router
 from app.routers import dashboard
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(
@@ -53,6 +54,7 @@ app.include_router(purchase_payments_router, dependencies=[Depends(get_current_u
 app.include_router(returns_router, dependencies=[Depends(get_current_user)])
 app.include_router(users_router, dependencies=[Depends(get_current_user)])
 app.include_router(dashboard.router, dependencies=[Depends(get_current_user)])
+app.include_router(reports_router, dependencies=[Depends(get_current_user)])
 @app.get("/")
 def root():
     return {
@@ -63,7 +65,8 @@ def root():
 @app.get("/health")
 def health():
     return {
-        "status": "healthy"
+        "status": "healthy",
+        "demo_seed_allowed": settings.DEMO_SEED_ALLOWED,
     }
 
 

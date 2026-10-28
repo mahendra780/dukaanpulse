@@ -29,6 +29,7 @@ SIDEBAR_PAGE_PERMISSIONS = {
     "/purchase-payments": frozenset({"purchase_payments:read", "purchases:read"}),
     "/returns": frozenset({"returns:read", "invoices:read"}),
     "/inventory": frozenset({"inventory:read", "products:read"}),
+    "/cash-credit": frozenset({"reports:read"}),
     "/users": frozenset({"users:manage"}),
 }
 
@@ -54,7 +55,23 @@ PAGE_LOAD_ENDPOINTS = {
     "/purchase-payments": ("/purchase-payments/", "/purchases/"),
     "/returns": ("/returns/", "/invoices/", "/invoices/1"),
     "/inventory": ("/products/", "/inventory/stock/1"),
+    "/cash-credit": (
+        "/reports/receivables",
+        "/reports/customer-risk",
+        "/reports/cash-flow",
+    ),
     "/users": ("/users",),
+}
+
+REPORTS_PAGE_PERMISSIONS = {
+    "/cash-credit": frozenset({"reports:read"}),
+}
+REPORTS_PAGE_LOAD_ENDPOINTS = {
+    "/cash-credit": (
+        "/reports/receivables",
+        "/reports/customer-risk",
+        "/reports/cash-flow",
+    ),
 }
 
 EXPECTED_SIDEBAR_PATHS = {
@@ -84,7 +101,7 @@ EXPECTED_SIDEBAR_PATHS = {
         "/inventory",
     },
     "ACCOUNTS": set(SIDEBAR_PAGE_PERMISSIONS) - {"/users"},
-    "VIEWER": set(SIDEBAR_PAGE_PERMISSIONS) - {"/users"},
+    "VIEWER": set(SIDEBAR_PAGE_PERMISSIONS) - {"/users", "/cash-credit"},
 }
 
 
@@ -211,6 +228,32 @@ class PermissionTests(unittest.TestCase):
         response = self._request_as("ACCOUNTS", "PATCH", "/returns/1/approve")
 
         self.assertNotEqual(response.status_code, 403)
+
+    def test_reports_read_is_granted_only_to_admin_and_accounts(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                self.assertEqual(
+                    "reports:read" in permissions_for_role(role),
+                    role in {"ADMIN", "ACCOUNTS"},
+                )
+
+    def test_reports_page_mapping_uses_only_report_endpoints(self):
+        self.assertEqual(
+            REPORTS_PAGE_PERMISSIONS,
+            {"/cash-credit": frozenset({"reports:read"})},
+        )
+        for endpoint in REPORTS_PAGE_LOAD_ENDPOINTS["/cash-credit"]:
+            with self.subTest(endpoint=endpoint):
+                self.assertTrue(endpoint.startswith("/reports/"))
+
+    def test_visible_reports_page_loads_without_a_forbidden_response(self):
+        for role in ROLES:
+            if "reports:read" not in permissions_for_role(role):
+                continue
+            for endpoint in REPORTS_PAGE_LOAD_ENDPOINTS["/cash-credit"]:
+                with self.subTest(role=role, endpoint=endpoint):
+                    response = self._request_as(role, "GET", endpoint)
+                    self.assertNotEqual(response.status_code, 403)
 
     def test_sidebar_mapping_matches_the_frontend_and_expected_role_visibility(self):
         self.assertEqual(sidebar_permissions_from_layout(), SIDEBAR_PAGE_PERMISSIONS)

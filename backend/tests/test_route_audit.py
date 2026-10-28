@@ -47,6 +47,21 @@ ROUTER_PROBES = {
     "Returns": ("POST", "/returns/", {"json": {}}, 422),
     "Users": ("GET", "/users", {}, 200),
     "Dashboard": ("GET", "/dashboard/sales?year=not-a-year", {}, 422),
+    "Reports": ("GET", "/reports/receivables", {}, 200),
+}
+
+REPORT_ROUTES = (
+    ("GET", "/reports/receivables"),
+    ("GET", "/reports/customer-risk"),
+    ("GET", "/reports/cash-flow"),
+)
+
+REPORT_ROLE_STATUS = {
+    "ADMIN": 200,
+    "ACCOUNTS": 200,
+    "SALES": 403,
+    "WAREHOUSE": 403,
+    "VIEWER": 403,
 }
 
 
@@ -157,7 +172,8 @@ class RouteAuthenticationAuditTests(unittest.TestCase):
         self.client.close()
         app.dependency_overrides.clear()
 
-    def _authorization_headers(self):
+    def _authorization_headers(self, role="ADMIN"):
+        self.user.role = role
         return {"Authorization": f"Bearer {create_access_token(self.user.user_id)}"}
 
     def test_every_non_public_route_requires_login(self):
@@ -190,6 +206,33 @@ class RouteAuthenticationAuditTests(unittest.TestCase):
                         len(route_permissions(routes_by_key[route_key])),
                         1,
                     )
+
+    def test_every_report_route_requires_reports_read_permission(self):
+        routes_by_key = {
+            (method, route.path): route
+            for route in concrete_routes()
+            for method in route.methods or set()
+            if method != "OPTIONS"
+        }
+
+        for method, path in REPORT_ROUTES:
+            with self.subTest(method=method, path=path):
+                self.assertEqual(
+                    route_permissions(routes_by_key[(method, path)]),
+                    {"reports:read"},
+                )
+
+    def test_every_report_route_has_the_expected_access_by_role(self):
+        for role, expected_status in REPORT_ROLE_STATUS.items():
+            for method, path in REPORT_ROUTES:
+                with self.subTest(role=role, method=method, path=path):
+                    response = self.client.request(
+                        method,
+                        path,
+                        headers=self._authorization_headers(role),
+                    )
+
+                    self.assertEqual(response.status_code, expected_status)
 
     def test_every_public_route_is_reachable_without_a_token(self):
         discovered_routes = set(route_keys())

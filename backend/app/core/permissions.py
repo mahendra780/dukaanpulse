@@ -24,6 +24,7 @@ _READ_RESOURCES = frozenset(
         "returns",
         "inventory",
         "dashboard",
+        "reports",
     }
 )
 _WRITE_RESOURCES = frozenset(
@@ -109,9 +110,12 @@ ROLE_PERMISSIONS = {
             "returns:approve",
             "inventory:read",
             "dashboard:read",
+            "reports:read",
         }
     ),
-    VIEWER: frozenset({f"{resource}:read" for resource in _READ_RESOURCES}),
+    VIEWER: frozenset(
+        f"{resource}:read" for resource in _READ_RESOURCES - {"reports"}
+    ),
 }
 
 # These authenticated endpoints intentionally need no business permission.

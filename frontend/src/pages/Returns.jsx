@@ -1,0 +1,296 @@
+import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
+import { listReturns, listInvoices, getInvoice, createReturn, approveReturn, receiveReturn } from "../api/endpoints";
+import { extractErrorMessage } from "../api/client";
+import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
+import StatusBadge from "../components/StatusBadge";
+import Modal from "../components/Modal";
+import { useToast } from "../components/ToastProvider";
+import { useConfirm } from "../components/ConfirmProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { todayLocal } from "../lib/dates";
+import { successMessage } from "../lib/messages";
+
+
+const REASONS = ["DAMAGED", "EXPIRED", "WRONG_PRODUCT", "QUALITY_ISSUE", "EXCESS_QUANTITY", "OTHER"];
+const CONDITIONS = ["RESELLABLE", "DAMAGED", "EXPIRED", "SUPPLIER_RETURN"];
+
+const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+function CreateReturnModal({ returnableInvoices, onClose, onCreated }) {
+  const [invoiceId, setInvoiceId] = useState(returnableInvoices[0]?.invoice_id ?? "");
+  const [invoiceDetail, setInvoiceDetail] = useState(null);
+  const [returnDate, setReturnDate] = useState(todayLocal());
+  const [reason, setReason] = useState(REASONS[0]);
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState({});
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!invoiceId) return;
+    setError("");
+    getInvoice(invoiceId)
+      .then(setInvoiceDetail)
+      .catch((err) => setError(extractErrorMessage(err)));
+  }, [invoiceId]);
+
+  const returnableItems = invoiceDetail ? invoiceDetail.items.filter((it) => it.returnable_quantity > 0) : [];
+
+  const updateLine = (invoiceItemId, patch) =>
+    setLines((l) => ({ ...l, [invoiceItemId]: { ...l[invoiceItemId], ...patch } }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    const itemsToSend = returnableItems
+      .filter((it) => Number(lines[it.invoice_item_id]?.quantity) > 0)
+      .map((it) => ({
+        product_id: it.product_id,
+        packaging_id: it.packaging_id,
+        quantity: Number(lines[it.invoice_item_id].quantity),
+        condition: lines[it.invoice_item_id]?.condition || CONDITIONS[0],
+      }));
+
+    if (itemsToSend.length === 0) {
+      setError("Please enter a quantity for at least one item.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await createReturn({
+        invoice_id: Number(invoiceId),
+        return_date: returnDate,
+        reason,
+        status: "REQUESTED",
+        notes: notes || null,
+        items: itemsToSend,
+      });
+      toast.success(successMessage("Return", "created"));
+      onCreated();
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="New return" onClose={onClose} maxWidth={720}>
+      <form onSubmit={submit}>
+        <ErrorBanner message={error} />
+        <div className="field-row">
+          <div className="field">
+            <label>Invoice</label>
+            <select required value={invoiceId} onChange={(e) => { setInvoiceId(e.target.value); setLines({}); }}>
+              {returnableInvoices.map((inv) => (
+                <option key={inv.invoice_id} value={inv.invoice_id}>{inv.invoice_number}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Return date</label>
+            <input type="date" required value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Reason</label>
+            <select required value={reason} onChange={(e) => setReason(e.target.value)}>
+              {REASONS.map((r) => <option key={r} value={r}>{r.replaceAll("_", " ")}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="field">
+          <label>Notes</label>
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </div>
+
+        {invoiceDetail && returnableItems.length === 0 && (
+          <EmptyState label="Every item on this invoice has already been fully returned." />
+        )}
+
+        {returnableItems.length > 0 && (
+          <>
+            <div className="item-row" style={{ gridTemplateColumns: "1.4fr 0.8fr 1fr", fontWeight: 600, fontSize: 12.5, color: "var(--muted)" }}>
+              <div>Product</div>
+              <div className="num">Qty to return</div>
+              <div>Condition</div>
+            </div>
+            {returnableItems.map((it) => (
+              <div className="item-row" key={it.invoice_item_id} style={{ gridTemplateColumns: "1.4fr 0.8fr 1fr" }}>
+                <div>
+                  {it.product_name}
+                  <div className="muted" style={{ fontSize: 11.5 }}>
+                    {it.returnable_quantity} of {it.quantity} {it.unit_name} returnable
+                  </div>
+                </div>
+                <input
+                  type="number" min="0" max={it.returnable_quantity} step="any"
+                  placeholder="0"
+                  value={lines[it.invoice_item_id]?.quantity ?? ""}
+                  onChange={(e) => updateLine(it.invoice_item_id, { quantity: e.target.value })}
+                />
+                <select
+                  value={lines[it.invoice_item_id]?.condition || CONDITIONS[0]}
+                  onChange={(e) => updateLine(it.invoice_item_id, { condition: e.target.value })}
+                >
+                  {CONDITIONS.map((c) => <option key={c} value={c}>{c.replaceAll("_", " ")}</option>)}
+                </select>
+              </div>
+            ))}
+          </>
+        )}
+
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || returnableItems.length === 0}>{saving ? "Creating return…" : "Create return"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export default function Returns() {
+  const [returns, setReturns] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [busy, setBusy] = useState(null); 
+  const toast = useToast();
+  const confirm = useConfirm();
+  const { can } = useAuth();
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    Promise.all([listReturns(), listInvoices()])
+      .then(([r, inv]) => {
+        setReturns(r);
+        setInvoices(inv);
+      })
+      .catch((err) => setError(extractErrorMessage(err)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, []);
+
+  const returnableInvoices = invoices.filter((inv) => inv.status !== "CANCELLED");
+
+  const handleApprove = async (r) => {
+    setBusy({ id: r.return_id, action: "approve" });
+    try {
+      await approveReturn(r.return_id);
+      toast.success(successMessage("Return", "approved"));
+      load();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleReceive = async (r) => {
+    const ok = await confirm({
+      title: "Receive this return?",
+      description: `The returned items for invoice ${r.invoice_number} will be received. Resellable items go back into your stock, and the invoice or the customer's credit balance is credited. This can't be undone.`,
+      confirmLabel: "Receive return",
+    });
+    if (!ok) return;
+
+    setBusy({ id: r.return_id, action: "receive" });
+    try {
+      const result = await receiveReturn(r.return_id);
+      toast.success(successMessage("Return", "received"));
+    
+      if (result?.credit_added_to_customer_balance > 0) {
+        toast.info(`${currency(result.credit_added_to_customer_balance)} was added to the customer's credit balance.`);
+      }
+      load();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1>Returns</h1>
+          <p>{returns.length} return{returns.length === 1 ? "" : "s"}</p>
+        </div>
+        {can("returns:write") && (
+          <button className="btn btn-primary" onClick={() => setShowCreate(true)} disabled={returnableInvoices.length === 0}>
+            <Plus size={15} /> New return
+          </button>
+        )}
+      </div>
+
+      <ErrorBanner message={error} />
+
+      {loading ? (
+        <Spinner />
+      ) : returns.length === 0 ? (
+        <EmptyState label="No returns found. Returns you create against invoices will appear here." />
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Date</th>
+                <th>Reason</th>
+                <th>Items</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {returns.map((r) => {
+                const rowBusy = busy?.id === r.return_id;
+                return (
+                  <tr key={r.return_id}>
+                    <td>{r.invoice_number || "—"}</td>
+                    <td>{r.return_date}</td>
+                    <td>{r.reason.replaceAll("_", " ")}</td>
+                    <td>{r.items.map((it) => `${it.product_name} (${it.quantity} ${it.unit_name})`).join(", ")}</td>
+                    <td><StatusBadge status={r.status} /></td>
+                    <td>
+                      <div className="section-actions">
+                        {can("returns:approve") && r.status === "REQUESTED" && (
+                          <button className="btn btn-secondary" disabled={rowBusy} onClick={() => handleApprove(r)}>
+                            {rowBusy && busy.action === "approve" ? "Approving…" : "Approve"}
+                          </button>
+                        )}
+                        {can("returns:receive") && r.status === "APPROVED" && (
+                          <button className="btn btn-secondary" disabled={rowBusy} onClick={() => handleReceive(r)}>
+                            {rowBusy && busy.action === "receive" ? "Receiving…" : "Receive"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showCreate && (
+        <CreateReturnModal
+          returnableInvoices={returnableInvoices}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}

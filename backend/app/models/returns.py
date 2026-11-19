@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Numeric,
     String,
     Text,
@@ -14,13 +15,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Return(Base):
+class Return(WorkspaceScoped, Base):
     __tablename__ = "returns"
 
     return_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -69,7 +72,7 @@ class Return(Base):
     )
 
 
-class ReturnItem(Base):
+class ReturnItem(WorkspaceScoped, Base):
     __tablename__ = "return_items"
 
     __table_args__ = (
@@ -85,6 +88,7 @@ class ReturnItem(Base):
 
     return_item_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 

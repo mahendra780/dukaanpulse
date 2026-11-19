@@ -5,20 +5,26 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Identity,
     Numeric,
     String,
+    UniqueConstraint,
     func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Invoice(Base):
+class Invoice(WorkspaceScoped, Base):
     __tablename__ = "invoices"
+    __table_args__ = (UniqueConstraint("workspace_id", "invoice_number", name="uq_invoices_workspace_number"),)
 
     invoice_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -30,8 +36,7 @@ class Invoice(Base):
 
     invoice_number: Mapped[str] = mapped_column(
         String(100),
-        nullable=False,
-        unique=True
+        nullable=False
     )
 
     invoice_date: Mapped[date] = mapped_column(
@@ -85,28 +90,38 @@ class Invoice(Base):
         back_populates="invoice",
         cascade="all, delete-orphan"
     )
-    delivery = relationship(
-    "Delivery",
-    back_populates="invoice",
-    uselist=False
+    deliveries = relationship(
+        "Delivery",
+        back_populates="invoice"
     )
     payments = relationship(
-    "Payment",
-    back_populates="invoice",
-    cascade="all, delete-orphan"
+        "Payment",
+        back_populates="invoice",
+        cascade="all, delete-orphan"
     )
     returns = relationship(
-    "Return",
-    back_populates="invoice"
+        "Return",
+        back_populates="invoice"
     )
 
 
 
-class InvoiceItem(Base):
+class InvoiceItem(WorkspaceScoped, Base):
     __tablename__ = "invoice_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["packaging_id", "product_id"],
+            [
+                "product_packaging.packaging_id",
+                "product_packaging.product_id",
+            ],
+            name="fk_invoice_item_packaging",
+        ),
+    )
 
     invoice_item_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -124,7 +139,6 @@ class InvoiceItem(Base):
 
     packaging_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product_packaging.packaging_id"),
         nullable=False
     )
 
@@ -162,10 +176,12 @@ class InvoiceItem(Base):
 
     product = relationship(
         "Product",
-        back_populates="invoice_items"
+        back_populates="invoice_items",
+        overlaps="invoice_items"
     )
 
     packaging = relationship(
         "ProductPackaging",
-        back_populates="invoice_items"
+        back_populates="invoice_items",
+        overlaps="invoice_items,product"
     )

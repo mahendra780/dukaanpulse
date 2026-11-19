@@ -1,0 +1,144 @@
+/* =====================================================================
+   DukaanPulse design tokens
+   Colour: five scales, 50 (lightest) to 900 (darkest). Primary 600 is the
+   exact maroon of the logo.
+   Type: Libre Baskerville for page and section titles, IBM Plex Sans for
+   everything else.
+   Space: steps of 4. Radius: 6 / 8 / 12 / 16. Elevation: flat, raised, overlay.
+   ===================================================================== */
+:root {
+  /* ---- Primary: logo maroon (600 = logo) ---- */
+  --primary-50: #f9f0f2;
+  --primary-100: #f4e1e4;
+  --primary-200: #eac8ce;
+  --primary-300: #db9ea8;
+  --primary-400: #c65366;
+  --primary-500: #7e2634;
+  --primary-600: #6d1f2c;
+  --primary-700: #501620;
+  --primary-800: #3b1218;
+  --primary-900: #260d11;
+
+  /* ---- Neutral: warm grey ---- */
+  --neutral-50: #f9f8f8;
+  --neutral-100: #f3f2f1;
+  --neutral-200: #e5e2e1;
+  --neutral-300: #cfcac9;
+  --neutral-400: #ada6a4;
+  --neutral-500: #867c79;
+  --neutral-600: #675e5b;
+  --neutral-700: #4f4745;
+  --neutral-800: #342f2d;
+  --neutral-900: #1f1b19;
+
+  /* ---- Success: green ---- */
+  --success-50: #effbf5;
+  --success-100: #d7f4e6;
+  --success-200: #b3e6ce;
+  --success-300: #7fd2ab;
+  --success-400: #36ba7c;
+  --success-500: #189158;
+  --success-600: #137c4b;
+  --success-700: #0e673e;
+  --success-800: #0a5230;
+  --success-900: #063720;
+
+  /* ---- Warning: yellow ---- */
+  --warning-50: #fff9e5;
+  --warning-100: #fff2c7;
+  --warning-200: #fee490;
+  --warning-300: #fcd555;
+  --warning-400: #f8c725;
+  --warning-500: #e7b308;
+  --warning-600: #ba8208;
+  --warning-700: #915d08;
+  --warning-800: #693d07;
+  --warning-900: #472606;
+
+  /* ---- Error: red ---- */
+  --error-50: #fef2f0;
+  --error-100: #fde1de;
+  --error-200: #f9c4be;
+  --error-300: #f39b91;
+  --error-400: #e86354;
+  --error-500: #ca3221;
+  --error-600: #ad291a;
+  --error-700: #902014;
+  --error-800: #6a1910;
+  --error-900: #45120c;
+
+  --brass: #c9a24a;              /* logo awning; accents only, never a status */
+
+  /* ---- Colour roles ---- */
+  --action: var(--primary-500);
+  --action-hover: var(--primary-600);
+  --action-pressed: var(--primary-700);
+  --action-soft: var(--primary-100);     /* tinted background, selected row */
+  --action-faint: var(--primary-50);     /* row hover */
+
+  --page: var(--neutral-100);
+  --surface: #ffffff;
+  --surface-sunken: var(--neutral-50);
+  --line: var(--neutral-200);
+  --line-strong: var(--neutral-300);
+  --input-line: var(--neutral-500);
+  --text: var(--neutral-900);
+  --text-muted: var(--neutral-600);
+  --nav: var(--primary-900);
+  --nav-text: var(--neutral-300);
+
+  /* ---- Typography ---- */
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Libre Baskerville", Georgia, "Times New Roman", serif;
+
+  --text-xs: 12px;     --leading-xs: 16px;
+  --text-sm: 13px;     --leading-sm: 20px;
+  --text-base: 14px;   --leading-base: 22px;
+  --text-md: 16px;     --leading-md: 24px;
+  --text-lg: 20px;     --leading-lg: 28px;
+  --text-xl: 26px;     --leading-xl: 32px;
+  --text-stat: 28px;   --leading-stat: 34px;
+
+  /* ---- Spacing: steps of 4 ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---- Radius ---- */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* ---- Elevation: cards and tables stay flat (border only) ---- */
+  --shadow-raised: 0 1px 2px rgba(31, 27, 25, 0.08), 0 4px 12px rgba(31, 27, 25, 0.10);
+  --shadow-overlay: 0 12px 32px rgba(31, 27, 25, 0.20);
+
+  /* ---- Control sizes ---- */
+  --control-h: 40px;
+  --control-h-sm: 32px;
+  --row-h: 44px;
+
+  /* ---- Names used inline by pages and components ---- */
+  --ink: var(--text);
+  --muted: var(--text-muted);
+  --accent: var(--action);
+  --accent-soft: var(--action-soft);
+  --green: var(--success-500);
+  --red: var(--error-500);
+  --amber: var(--warning-700);
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 350ms;
+}

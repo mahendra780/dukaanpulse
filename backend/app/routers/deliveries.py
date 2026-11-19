@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException,Body
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.delivery import Delivery
 from app.models.invoice import Invoice
@@ -15,12 +17,12 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("deliveries:write"))])
 def create_delivery(
     data: DeliveryCreate,
     db: Session = Depends(get_db)
 ):
-    # Check invoice
+   
     invoice = db.execute(
         select(Invoice)
         .options(
@@ -37,12 +39,19 @@ def create_delivery(
             detail="Invoice not found"
         )
 
-    # Only one delivery per invoice
+
     existing_delivery = db.execute(
         select(Delivery).where(
-            Delivery.invoice_id == data.invoice_id
+            Delivery.invoice_id == data.invoice_id,
+            Delivery.status != "CANCELLED"
         )
     ).scalar_one_or_none()
+
+    if existing_delivery:
+        raise HTTPException(
+            status_code=409,
+            detail="Delivery already exists for this invoice"
+        )
 
     if existing_delivery:
         raise HTTPException(
@@ -60,20 +69,30 @@ def create_delivery(
         notes=data.notes
     )
 
-    db.add(delivery)
-    db.flush()
+    try:
+        db.add(delivery)
+        db.flush()
 
-    # Stock deduction only when delivery is completed
-    if delivery.status == "DELIVERED":
+    
+        if delivery.status == "DELIVERED":
 
-        for invoice_item in invoice.items:
-            create_sale_movement(
-                db,
-                invoice_item
-            )
+            for invoice_item in invoice.items:
+                create_sale_movement(
+                    db,
+                    invoice_item
+                )
 
-    db.commit()
-    db.refresh(delivery)
+        db.commit()
+        db.refresh(delivery)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Delivery conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to create delivery")
 
     return {
         "message": "Delivery created successfully",
@@ -81,7 +100,7 @@ def create_delivery(
         "invoice_id": delivery.invoice_id,
         "status": delivery.status
     }
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("deliveries:read"))])
 def get_deliveries(
     db: Session = Depends(get_db)
 ):
@@ -114,7 +133,7 @@ def get_deliveries(
 
     return result
 
-@router.patch("/{delivery_id}/status")
+@router.patch("/{delivery_id}/status", dependencies=[Depends(require_permission("deliveries:write"))])
 def update_delivery_status(
     delivery_id: int,
     data: dict = Body(...),
@@ -140,7 +159,9 @@ def update_delivery_status(
     allowed_status = [
         "PENDING",
         "DISPATCHED",
+        "OUT_FOR_DELIVERY",
         "DELIVERED",
+        "FAILED",
         "CANCELLED"
     ]
 
@@ -148,8 +169,8 @@ def update_delivery_status(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Status must be PENDING, DISPATCHED, "
-                "DELIVERED or CANCELLED"
+                "Status must be PENDING, DISPATCHED, OUT_FOR_DELIVERY, "
+                "DELIVERED, FAILED or CANCELLED"
             )
         )
 
@@ -166,7 +187,9 @@ def update_delivery_status(
 
     valid_transitions = {
         "PENDING": ["DISPATCHED", "CANCELLED"],
-        "DISPATCHED": ["DELIVERED", "CANCELLED"]
+        "DISPATCHED": ["OUT_FOR_DELIVERY", "FAILED", "CANCELLED"],
+        "OUT_FOR_DELIVERY": ["DELIVERED", "FAILED", "CANCELLED"],
+        "FAILED": ["OUT_FOR_DELIVERY", "CANCELLED"],
     }
 
     if new_status not in valid_transitions[current_status]:
@@ -180,16 +203,25 @@ def update_delivery_status(
 
     delivery.status = new_status
 
-    # Stock decreases only after successful delivery
-    if new_status == "DELIVERED":
-        for invoice_item in delivery.invoice.items:
-            create_sale_movement(
-                db,
-                invoice_item
-            )
+    try:
+        if new_status == "DELIVERED":
+            for invoice_item in delivery.invoice.items:
+                create_sale_movement(
+                    db,
+                    invoice_item
+                )
 
-    db.commit()
-    db.refresh(delivery)
+        db.commit()
+        db.refresh(delivery)
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Delivery status update conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to update delivery status")
 
     return {
         "message": "Delivery status updated successfully",

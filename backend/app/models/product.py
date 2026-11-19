@@ -1,16 +1,19 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Product(Base):
+class Product(WorkspaceScoped, Base):
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("workspace_id", "sku", name="uq_products_workspace_sku"),)
 
     product_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -32,8 +35,7 @@ class Product(Base):
 
     sku: Mapped[str] = mapped_column(
         String(50),
-        nullable=False,
-        unique=True
+        nullable=False
     )
 
     status: Mapped[str] = mapped_column(
@@ -44,7 +46,8 @@ class Product(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        nullable=False
+        nullable=False,
+        server_default=func.now()
     )
 
     category = relationship(

@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,5 +22,5 @@ class InvoiceCreate(BaseModel):
     discount: float = Field(default=0, ge=0)
     tax: float = Field(default=0, ge=0)
     total_amount: float = Field(ge=0)
-    status: str = "UNPAID"
+    status: Literal["UNPAID", "PARTIALLY_PAID", "PAID", "CANCELLED"] = "UNPAID"
     items: list[InvoiceItemCreate] = Field(min_length=1)

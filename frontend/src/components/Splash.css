@@ -1,0 +1,193 @@
+/* ---------- Logo intro (Splash.jsx) ---------- */
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: var(--primary-900, #260d11);
+  color: var(--brass, #c9a24a);
+}
+
+/* Nothing shows until the timeline starts, so the mark never flashes fully
+   drawn before it animates. */
+.splash:not(.splash-run) .sp-stage {
+  opacity: 0;
+}
+
+.sp-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sp-mark {
+  width: clamp(64px, 18vw, 96px);
+  height: auto;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.sp-badge,
+.sp-awning,
+.sp-d {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* The name sits in a grid column that grows from 0 to its natural width, so
+   no widths need to be measured. At rest the column is closed. */
+.sp-reveal {
+  display: grid;
+  grid-template-columns: 0fr;
+}
+
+.sp-clip {
+  min-width: 0;
+  overflow: hidden;
+  padding-block: var(--space-2, 8px);
+}
+
+.sp-word {
+  padding-left: clamp(16px, 4vw, 24px);
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.sp-name {
+  font-family: var(--font-serif, Georgia, "Times New Roman", serif);
+  font-size: clamp(26px, 7vw, 46px);
+  line-height: 1.1;
+  letter-spacing: 0.3em;
+  color: var(--brass, #c9a24a);
+}
+
+.sp-name strong {
+  font-weight: 700;
+}
+
+.sp-name span {
+  font-weight: 400;
+}
+
+.sp-tag {
+  margin-top: var(--space-2, 8px);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--neutral-300, #cfcac9);
+}
+
+.sp-skip {
+  position: absolute;
+  right: var(--space-6, 24px);
+  bottom: var(--space-6, 24px);
+  min-height: 40px;
+  padding: 0 var(--space-4, 16px);
+  border: 0;
+  border-radius: var(--radius, 8px);
+  background: transparent;
+  color: var(--neutral-300, #cfcac9);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  animation: sp-fade 0.4s ease 1s forwards;
+}
+
+.sp-skip:hover {
+  color: #ffffff;
+}
+
+.sp-skip:focus-visible {
+  outline: 2px solid var(--brass, #c9a24a);
+  outline-offset: 2px;
+}
+
+/* ---------- Timeline: 4.4s in total ---------- */
+
+.splash-run {
+  animation: sp-out 0.6s ease-in 3.8s forwards;
+}
+
+.splash.splash-skip {
+  animation: sp-out 0.25s ease-in 0s forwards;
+}
+
+.splash-run .sp-badge {
+  animation: sp-pop 0.6s var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) 0.1s backwards;
+}
+
+.splash-run .sp-awning {
+  animation: sp-drop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s backwards;
+}
+
+.splash-run .sp-arch {
+  stroke-dasharray: 1;
+  animation: sp-draw 0.55s ease-out 0.6s backwards;
+}
+
+.splash-run .sp-d {
+  animation: sp-rise 0.35s ease-out 0.9s backwards;
+}
+
+.splash-run .sp-reveal {
+  animation: sp-expand 4.4s ease-in-out backwards;
+}
+
+.splash-run .sp-word {
+  animation: sp-word 4.4s ease-in-out backwards;
+}
+
+.splash-run .sp-name {
+  animation: sp-track 4.4s ease-in-out backwards;
+}
+
+@keyframes sp-pop {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes sp-drop {
+  from { opacity: 0; transform: translateY(-16px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes sp-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes sp-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* mark alone, name opens out, holds, folds back into the mark */
+@keyframes sp-expand {
+  0%, 24% { grid-template-columns: 0fr; }
+  44%, 64% { grid-template-columns: 1fr; }
+  84%, 100% { grid-template-columns: 0fr; }
+}
+
+@keyframes sp-word {
+  0%, 26% { opacity: 0; }
+  42%, 66% { opacity: 1; }
+  80%, 100% { opacity: 0; }
+}
+
+@keyframes sp-track {
+  0%, 24% { letter-spacing: 0.3em; }
+  44%, 64% { letter-spacing: 0.02em; }
+  84%, 100% { letter-spacing: 0.3em; }
+}
+
+@keyframes sp-fade {
+  to { opacity: 1; }
+}
+
+@keyframes sp-out {
+  to { opacity: 0; visibility: hidden; transform: scale(1.03); }
+}

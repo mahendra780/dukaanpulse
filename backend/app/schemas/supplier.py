@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal
 
 
 class SupplierCreate(BaseModel):
@@ -7,6 +8,7 @@ class SupplierCreate(BaseModel):
     address: str
     gst_number: str | None = Field(default=None, max_length=15)
     payment_terms_days: int = Field(default=0, ge=0)
+    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
 
 
 # ⭐ New Schema

@@ -3,18 +3,27 @@ from sqlalchemy.orm import Session
 from app.models.inventory import InventoryMovement
 from app.models.purchase import PurchaseItem
 from fastapi import HTTPException
-from sqlalchemy import select,func
+from sqlalchemy import select, func, text
 from app.models.invoice import InvoiceItem
+
+
+def _lock_product_stock(db: Session, product_id: int) -> None:
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": product_id}
+    )
 
 
 def create_purchase_movement(
     db: Session,
-    purchase_item: PurchaseItem
+    purchase_item: PurchaseItem,
+    received_qty: float
 ):
+
     packaging = purchase_item.packaging
 
     base_quantity = (
-        float(purchase_item.received_quantity)
+        float(received_qty)
         * float(packaging.conversion_to_base)
     )
 
@@ -25,7 +34,7 @@ def create_purchase_movement(
         purchase_item_id=purchase_item.purchase_item_id,
         notes=(
             f"Purchase received: "
-            f"{purchase_item.received_quantity} "
+            f"{received_qty} "
             f"{packaging.unit_name}"
         )
     )
@@ -41,7 +50,7 @@ def create_sale_movement(
     db,
     invoice_item: InvoiceItem
 ):
-    # Prevent duplicate sale movement
+
     existing = db.execute(
         select(InventoryMovement).where(
             InventoryMovement.invoice_item_id
@@ -66,7 +75,8 @@ def create_sale_movement(
         * float(packaging.conversion_to_base)
     )
 
-    # Check available stock
+    _lock_product_stock(db, invoice_item.product_id)
+
     current_stock = db.execute(
         select(
             func.coalesce(
@@ -107,7 +117,6 @@ def create_return_movement(
 ):
     from sqlalchemy import select
 
-    # Prevent duplicate return movement
     existing = db.execute(
         select(InventoryMovement).where(
             InventoryMovement.return_item_id
@@ -124,7 +133,6 @@ def create_return_movement(
             )
         )
 
-    # Only sellable returned goods come back into stock
     if return_item.condition != "RESELLABLE":
         return None
 

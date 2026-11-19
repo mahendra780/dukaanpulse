@@ -9,15 +9,18 @@ from sqlalchemy import (
     Identity,
     Numeric,
     String,
+    UniqueConstraint,
     func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Invoice(Base):
+class Invoice(WorkspaceScoped, Base):
     __tablename__ = "invoices"
+    __table_args__ = (UniqueConstraint("workspace_id", "invoice_number", name="uq_invoices_workspace_number"),)
 
     invoice_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -33,8 +36,7 @@ class Invoice(Base):
 
     invoice_number: Mapped[str] = mapped_column(
         String(100),
-        nullable=False,
-        unique=True
+        nullable=False
     )
 
     invoice_date: Mapped[date] = mapped_column(
@@ -104,7 +106,7 @@ class Invoice(Base):
 
 
 
-class InvoiceItem(Base):
+class InvoiceItem(WorkspaceScoped, Base):
     __tablename__ = "invoice_items"
     __table_args__ = (
         ForeignKeyConstraint(

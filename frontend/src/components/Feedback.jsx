@@ -1,9 +1,24 @@
 import { XCircle } from "lucide-react";
+import { PageSkeleton, TableSkeleton } from "./Skeleton";
 
-export function Spinner({ label = "Loading…" }) {
+// variant="table" (default): a table-shaped placeholder, for the list area
+//   of a page whose heading and toolbar are already on screen.
+// variant="page": a full-page placeholder (heading + toolbar + table).
+// variant="text": a plain centred line, for the session check before the
+//   app shell exists.
+export function Spinner({ label = "Loading…", variant = "table" }) {
+  if (variant === "page") return <PageSkeleton label={label} />;
+  if (variant === "text") {
+    return (
+      <div className="spinner-wrap" role="status" aria-live="polite">
+        {label}
+      </div>
+    );
+  }
   return (
-    <div className="spinner-wrap" role="status" aria-live="polite">
-      {label}
+    <div role="status" aria-live="polite">
+      <span className="sr-only">{label}</span>
+      <TableSkeleton />
     </div>
   );
 }

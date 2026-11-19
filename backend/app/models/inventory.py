@@ -13,9 +13,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class InventoryMovement(Base):
+class InventoryMovement(WorkspaceScoped, Base):
     __tablename__ = "inventory_movements"
 
     movement_id: Mapped[int] = mapped_column(

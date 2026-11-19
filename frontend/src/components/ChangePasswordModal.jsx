@@ -31,6 +31,7 @@ export default function ChangePasswordModal({ onClose }) {
       const result = await changePassword({
         current_password: form.currentPassword,
         new_password: form.newPassword,
+        confirm_password: form.confirmPassword,
       });
       toast.success(result.message);
       onClose();
@@ -65,7 +66,7 @@ export default function ChangePasswordModal({ onClose }) {
             value={form.newPassword}
             onChange={(event) => setForm({ ...form, newPassword: event.target.value })}
             autoComplete="new-password"
-            minLength={10}
+            minLength={12}
             required
             disabled={saving}
           />
@@ -77,7 +78,7 @@ export default function ChangePasswordModal({ onClose }) {
             value={form.confirmPassword}
             onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })}
             autoComplete="new-password"
-            minLength={10}
+            minLength={12}
             required
             disabled={saving}
           />

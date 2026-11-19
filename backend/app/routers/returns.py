@@ -198,10 +198,14 @@ def receive_return(
     from app.services.inventory_service import create_return_movement
     from app.services.invoice_service import recalculate_invoice_status
 
-    return_record = db.get(
-        Return,
-        return_id
-    )
+    # Row lock: a second concurrent receive request waits here and then sees
+    # status RECEIVED, so credit/payment/stock cannot be applied twice.
+    return_record = db.execute(
+        select(Return)
+        .where(Return.return_id == return_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
 
     if not return_record:
         raise HTTPException(
@@ -231,18 +235,26 @@ def receive_return(
                 return_item
             )
 
-            invoice_item = db.execute(
-                select(InvoiceItem).where(
+            # Credit what the customer actually paid per unit: line_total
+            # already includes the line's discount and tax. If the same
+            # product/packaging appears on more than one invoice line, use
+            # the average effective price across those lines instead of
+            # picking one arbitrarily.
+            sold_value, sold_qty = db.execute(
+                select(
+                    func.coalesce(func.sum(InvoiceItem.line_total), 0),
+                    func.coalesce(func.sum(InvoiceItem.quantity), 0),
+                ).where(
                     InvoiceItem.invoice_id == return_record.invoice_id,
                     InvoiceItem.product_id == return_item.product_id,
                     InvoiceItem.packaging_id == return_item.packaging_id,
                 )
-            ).scalars().first()
+            ).one()
 
-            if invoice_item:
-                total_credit += (
-                    float(return_item.quantity)
-                    * float(invoice_item.unit_price)
+            if float(sold_qty) > 0:
+                effective_unit_price = float(sold_value) / float(sold_qty)
+                total_credit += round(
+                    float(return_item.quantity) * effective_unit_price, 2
                 )
 
         credit_applied_to_invoice = 0.0
@@ -272,7 +284,16 @@ def receive_return(
 
             if credit_added_to_customer_balance > 0:
                 order = db.get(Order, invoice.order_id)
-                customer = db.get(Customer, order.customer_id) if order else None
+                customer = (
+                    db.execute(
+                        select(Customer)
+                        .where(Customer.customer_id == order.customer_id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    ).scalar_one_or_none()
+                    if order
+                    else None
+                )
                 if customer is not None:
                     customer.credit_balance = float(customer.credit_balance) + credit_added_to_customer_balance
 

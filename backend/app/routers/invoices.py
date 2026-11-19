@@ -130,7 +130,7 @@ def create_invoice(
             discount=data.discount,
             tax=data.tax,
             total_amount=data.total_amount,
-            status=data.status,
+            status="UNPAID",
         )
 
         db.add(invoice)

@@ -8,6 +8,7 @@ import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { todayLocal } from "../lib/dates";
 import { successMessage } from "../lib/messages";
 
 
@@ -15,7 +16,7 @@ function CreateInvoiceModal({ orders, onClose, onCreated }) {
   const [orderId, setOrderId] = useState(orders[0]?.order_id ?? "");
   const [orderDetail, setOrderDetail] = useState(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [invoiceDate, setInvoiceDate] = useState(todayLocal());
   const [lines, setLines] = useState({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

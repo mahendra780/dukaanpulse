@@ -9,15 +9,18 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Payment(Base):
+class Payment(WorkspaceScoped, Base):
     __tablename__ = "payments"
+    __table_args__ = (UniqueConstraint("workspace_id", "reference_number", name="uq_payments_workspace_reference"),)
 
     payment_id: Mapped[int] = mapped_column(
         BigInteger,

@@ -4,11 +4,10 @@ import {
   clearPostLoginPath,
   clearStoredSession,
   getPostLoginPath,
-  getStoredToken,
   setUnauthorizedHandler,
-  storeToken,
 } from "../api/client";
-import { getCurrentUser, login as loginRequest } from "../api/endpoints";
+import { getCurrentUser, login as loginRequest, logout as logoutRequest, switchWorkspace as switchWorkspaceRequest } from "../api/endpoints";
+import { useToast } from "../components/ToastProvider";
 
 const AuthContext = createContext(null);
 
@@ -19,21 +18,27 @@ function currentPath(location) {
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [token, setToken] = useState(getStoredToken);
+  const toast = useToast();
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const clearSession = useCallback(() => {
     clearStoredSession();
-    setToken(null);
     setUser(null);
   }, []);
 
+  // Leave straight away and tell the server in the background. Waiting for
+  // the server's reply first meant the click seemed to do nothing for as long
+  // as that request took.
   const logout = useCallback(() => {
+    logoutRequest().catch(() => {
+      // A stale or expired cookie should still leave the UI signed out.
+    });
     clearSession();
     clearPostLoginPath();
     navigate("/login", { replace: true });
-  }, [clearSession, navigate]);
+    toast.success("You have been logged out.");
+  }, [clearSession, navigate, toast]);
 
   const handleUnauthorized = useCallback(() => {
     clearSession();
@@ -54,13 +59,6 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let isCurrent = true;
 
-    if (!token) {
-      setIsLoading(false);
-      return () => {
-        isCurrent = false;
-      };
-    }
-
     getCurrentUser()
       .then((currentUser) => {
         if (isCurrent) setUser(currentUser);
@@ -75,22 +73,25 @@ export function AuthProvider({ children }) {
     return () => {
       isCurrent = false;
     };
+  }, [clearSession]);
+
+  const refresh = useCallback(async () => {
+    const currentUser = await getCurrentUser();
+    setUser(currentUser);
+    return currentUser;
   }, []);
 
-  const login = useCallback(async (username, password) => {
-    const response = await loginRequest(username, password);
-    storeToken(response.access_token);
-    setToken(response.access_token);
-
-    try {
-      const currentUser = await getCurrentUser();
-      setUser(currentUser);
-      return currentUser;
-    } catch (error) {
-      clearSession();
-      throw error;
-    }
+  const login = useCallback(async (identifier, password) => {
+    const currentUser = await loginRequest(identifier, password);
+    setUser(currentUser);
+    return currentUser;
   }, [clearSession]);
+
+  const switchWorkspace = useCallback(async (workspaceId) => {
+    const currentUser = await switchWorkspaceRequest({ workspace_id: workspaceId });
+    setUser(currentUser);
+    return currentUser;
+  }, []);
 
   const can = useCallback(
     (permission) => user?.permissions?.includes(permission) ?? false,
@@ -98,7 +99,7 @@ export function AuthProvider({ children }) {
   );
 
   return (
-    <AuthContext.Provider value={{ token, user, isLoading, login, logout, can }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, refresh, switchWorkspace, can }}>
       {children}
     </AuthContext.Provider>
   );

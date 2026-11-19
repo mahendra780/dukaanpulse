@@ -15,9 +15,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Order(Base):
+class Order(WorkspaceScoped, Base):
     __tablename__ = "orders"
 
     order_id: Mapped[int] = mapped_column(
@@ -70,7 +71,7 @@ class Order(Base):
     )
 
 
-class OrderItem(Base):
+class OrderItem(WorkspaceScoped, Base):
     __tablename__ = "order_items"
     __table_args__ = (
         ForeignKeyConstraint(

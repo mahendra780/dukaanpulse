@@ -3,10 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DukaanPulse</title>
+    <meta name="theme-color" content="#260d11" />
+    <title>DukaanPulse | Wholesale ERP</title>
+    <meta
+      name="description"
+      content="DukaanPulse is a wholesale ERP for distributors: orders, stock, payments and credit risk in one place."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Libre+Baskerville:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Shown before the JavaScript loads, so opening the site never starts
+         with a blank white page. React replaces it as soon as it mounts. */
+      .boot { position: fixed; inset: 0; background: #260d11; }
+      .no-boot .boot { display: none; }
+    </style>
+    <script>
+      try {
+        if (sessionStorage.getItem("dukaanpulse:splash-seen") === "1") {
+          document.documentElement.classList.add("no-boot");
+        } else {
+          // The landing page holds its entrance animations until the logo
+          // intro is over.
+          document.documentElement.dataset.splash = "playing";
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot"></div></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -15,9 +15,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Return(Base):
+class Return(WorkspaceScoped, Base):
     __tablename__ = "returns"
 
     return_id: Mapped[int] = mapped_column(
@@ -71,7 +72,7 @@ class Return(Base):
     )
 
 
-class ReturnItem(Base):
+class ReturnItem(WorkspaceScoped, Base):
     __tablename__ = "return_items"
 
     __table_args__ = (

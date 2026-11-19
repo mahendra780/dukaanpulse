@@ -17,7 +17,8 @@ import {
   getPaymentSummary,
 } from "../api/endpoints";
 import { extractErrorMessage } from "../api/client";
-import { Spinner, ErrorBanner, EmptyState } from "../components/Feedback";
+import { ErrorBanner, EmptyState } from "../components/Feedback";
+import { DashboardSkeleton } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 
 const currency = (n) =>
@@ -67,7 +68,7 @@ export default function Dashboard() {
     };
   }, [year]);
 
-  if (loading) return <Spinner label="Loading dashboard…" />;
+  if (loading) return <DashboardSkeleton />;
 
   const trend = sales.map((row, i) => ({
     month: row.month,
@@ -104,15 +105,15 @@ export default function Dashboard() {
         <h3 className="panel-title">Sales vs purchases — {year}</h3>
         <ResponsiveContainer width="100%" height={260}>
           <LineChart data={trend}>
-            <CartesianGrid stroke="#e3e1d9" vertical={false} />
+            <CartesianGrid stroke="#e5e2e1" vertical={false} />
             <XAxis
               dataKey="month"
-              tick={{ fontSize: 12, fill: "#6e736f" }}
-              axisLine={{ stroke: "#e3e1d9" }}
+              tick={{ fontSize: 12, fill: "#675e5b" }}
+              axisLine={{ stroke: "#e5e2e1" }}
               tickLine={false}
             />
             <YAxis
-              tick={{ fontSize: 12, fill: "#6e736f" }}
+              tick={{ fontSize: 12, fill: "#675e5b" }}
               axisLine={false}
               tickLine={false}
               width={70}
@@ -122,7 +123,7 @@ export default function Dashboard() {
               formatter={(v) => currency(v)}
               contentStyle={{
                 borderRadius: 6,
-                border: "1px solid #e3e1d9",
+                border: "1px solid #e5e2e1",
                 fontSize: 13,
               }}
             />
@@ -130,7 +131,7 @@ export default function Dashboard() {
               type="monotone"
               dataKey="sales"
               name="Sales"
-              stroke="#1f4b4c"
+              stroke="#7e2634"
               strokeWidth={2}
               dot={false}
             />
@@ -138,7 +139,7 @@ export default function Dashboard() {
               type="monotone"
               dataKey="purchases"
               name="Purchases"
-              stroke="#b7791f"
+              stroke="#867c79"
               strokeWidth={2}
               dot={false}
             />

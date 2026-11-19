@@ -1,334 +1,233 @@
-import os
-import unittest
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from datetime import timedelta
+from uuid import UUID
 
-os.environ["DATABASE_URL"] = "postgresql+psycopg://test:test@localhost/test"
-os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key-that-is-long-enough"
-
-import jwt
-from fastapi import HTTPException
-
-from app.core.auth import get_current_user
 from app.core.config import settings
-from app.core.permissions import permissions_for_role
-from app.core.roles import USER_STATUSES
-from app.core.security import create_access_token, hash_password, verify_password
-from app.models.user import User
-from app.routers.auth import change_password, get_me, login
-from app.schemas.auth import ChangePasswordRequest, CurrentUserResponse
+from app.models.auth_lifecycle import OtpChallenge
+from tests.auth_test_support import CookieSessionTestCase
 
 
-class FakeResult:
-    def __init__(self, user: User | None):
-        self.user = user
-
-    def scalar_one_or_none(self) -> User | None:
-        return self.user
-
-
-class FakeSession:
-    def __init__(self, users: list[User]):
-        self.users = {user.user_id: user for user in users}
-        self.commit_count = 0
-        self.rollback_count = 0
-
-    def execute(self, statement):
-        username = next(iter(statement.compile().params.values()))
-        user = next(
-            (
-                candidate
-                for candidate in self.users.values()
-                if candidate.username.lower() == username
-            ),
-            None,
-        )
-        return FakeResult(user)
-
-    def get(self, model, user_id: int) -> User | None:
-        return self.users.get(user_id)
-
-    def commit(self) -> None:
-        self.commit_count += 1
-
-    def rollback(self) -> None:
-        self.rollback_count += 1
-
-    def close(self) -> None:
-        pass
-
-
-class AuthenticationEndpointTests(unittest.TestCase):
-    def setUp(self):
-        self.active_user = User(
-            user_id=1,
-            username="Admin",
-            full_name="Active Administrator",
-            password_hash=hash_password("current-password"),
-            role="ADMIN",
-            status=USER_STATUSES[0],
-            failed_login_count=0,
-            locked_until=None,
-        )
-        self.inactive_user = User(
-            user_id=2,
-            username="Inactive",
-            full_name="Inactive User",
-            password_hash=hash_password("current-password"),
-            role="VIEWER",
-            status=USER_STATUSES[1],
-            failed_login_count=0,
-            locked_until=None,
-        )
-        self.db = FakeSession([self.active_user, self.inactive_user])
-
-    def _login(self, username: str, password: str):
-        return login(
-            SimpleNamespace(username=username, password=password),
-            self.db,
-        )
-
-    def _login_error(self, username: str, password: str) -> HTTPException:
-        with self.assertRaises(HTTPException) as context:
-            self._login(username, password)
-        return context.exception
-
-    def test_login_success_sets_last_login_and_returns_bearer_token(self):
-        response = self._login("ADMIN", "current-password")
-
-        self.assertEqual(response["token_type"], "bearer")
-        self.assertEqual(
-            response["expires_in"],
-            settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        )
-        self.assertEqual(
-            response["access_token"].count("."),
-            2,
-        )
-        self.assertIsNotNone(self.active_user.last_login_at)
-        self.assertEqual(self.db.commit_count, 1)
-
-    def test_failed_login_threshold_locks_an_active_user(self):
-        for attempt in range(1, settings.FAILED_LOGIN_ATTEMPT_THRESHOLD + 1):
-            error = self._login_error("Admin", "wrong-password")
-
-            self.assertEqual(error.status_code, 401)
-            self.assertEqual(error.detail, "Incorrect username or password.")
-            self.assertEqual(self.active_user.failed_login_count, attempt)
-            if attempt < settings.FAILED_LOGIN_ATTEMPT_THRESHOLD:
-                self.assertIsNone(self.active_user.locked_until)
-
-        self.assertIsNotNone(self.active_user.locked_until)
-        self.assertGreater(self.active_user.locked_until, datetime.now(timezone.utc))
-        self.assertEqual(
-            self.db.commit_count,
-            settings.FAILED_LOGIN_ATTEMPT_THRESHOLD,
-        )
-
-    def test_locked_account_rejects_a_correct_password_generically(self):
-        self.active_user.failed_login_count = settings.FAILED_LOGIN_ATTEMPT_THRESHOLD
-        self.active_user.locked_until = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.LOGIN_LOCKOUT_MINUTES
-        )
-
-        error = self._login_error("Admin", "current-password")
-
-        self.assertEqual(error.status_code, 401)
-        self.assertEqual(error.detail, "Incorrect username or password.")
-        self.assertEqual(
-            self.active_user.failed_login_count,
-            settings.FAILED_LOGIN_ATTEMPT_THRESHOLD,
-        )
-        self.assertEqual(self.db.commit_count, 0)
-
-    def test_expired_lock_allows_successful_login_and_resets_state(self):
-        self.active_user.failed_login_count = settings.FAILED_LOGIN_ATTEMPT_THRESHOLD
-        self.active_user.locked_until = datetime.now(timezone.utc) - timedelta(
-            seconds=1
-        )
-
-        response = self._login("Admin", "current-password")
-
-        self.assertEqual(response["token_type"], "bearer")
-        self.assertEqual(self.active_user.failed_login_count, 0)
-        self.assertIsNone(self.active_user.locked_until)
-        self.assertEqual(self.db.commit_count, 1)
-
-    def test_successful_login_resets_prior_failed_attempts(self):
-        self.active_user.failed_login_count = 2
-        self.active_user.locked_until = None
-
-        self._login("Admin", "current-password")
-
-        self.assertEqual(self.active_user.failed_login_count, 0)
-        self.assertIsNone(self.active_user.locked_until)
-        self.assertEqual(self.db.commit_count, 1)
-
-    def test_unknown_username_response_matches_wrong_password_response(self):
-        wrong_password_error = self._login_error("Admin", "wrong-password")
-        unknown_username_error = self._login_error("unknown-user", "wrong-password")
-
-        self.assertEqual(
-            unknown_username_error.status_code,
-            wrong_password_error.status_code,
-        )
-        self.assertEqual(
-            unknown_username_error.detail,
-            wrong_password_error.detail,
-        )
-        self.assertEqual(
-            wrong_password_error.status_code,
-            401,
-        )
-        self.assertEqual(
-            wrong_password_error.detail,
-            "Incorrect username or password.",
-        )
-        self.assertEqual(self.active_user.failed_login_count, 1)
-        self.assertEqual(self.db.commit_count, 1)
-
-    def test_inactive_user_response_matches_wrong_password_response(self):
-        wrong_password_error = self._login_error("Admin", "wrong-password")
-        inactive_user_error = self._login_error("Inactive", "current-password")
-
-        self.assertEqual(inactive_user_error.status_code, 401)
-        self.assertEqual(inactive_user_error.detail, wrong_password_error.detail)
-        self.assertEqual(self.inactive_user.failed_login_count, 0)
-        self.assertIsNone(self.inactive_user.locked_until)
-
-    def test_unknown_user_does_not_change_known_user_lockout_state(self):
-        error = self._login_error("unknown-user", "wrong-password")
-
-        self.assertEqual(error.status_code, 401)
-        self.assertEqual(error.detail, "Incorrect username or password.")
-        self.assertEqual(self.active_user.failed_login_count, 0)
-        self.assertIsNone(self.active_user.locked_until)
-        self.assertEqual(self.db.commit_count, 0)
-
-    def test_get_me_with_a_valid_token_returns_only_current_user_fields(self):
-        current_user = get_current_user(
-            token=create_access_token(1),
-            db=self.db,
-        )
-        response = CurrentUserResponse.model_validate(get_me(current_user)).model_dump()
-
-        self.assertEqual(
-            response,
-            {
-                "user_id": 1,
-                "username": "Admin",
-                "full_name": "Active Administrator",
-                "role": "ADMIN",
-                "status": "ACTIVE",
-                "permissions": permissions_for_role("ADMIN"),
+class AuthenticationLifecycleTests(CookieSessionTestCase):
+    def test_signup_verification_creates_owner_workspace_and_cookie_session(self):
+        started = self.client.post(
+            "/auth/signup",
+            json={
+                "full_name": "Business Owner",
+                "business_name": "Northwind Traders",
+                "mobile_number": "9876543210",
+                "username": "owner",
+                "password": "twelve-character-password",
+                "confirm_password": "twelve-character-password",
             },
         )
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(self.sms.messages[0][0], "+919876543210")
+        self.assertEqual(self.sms.messages[0][2], "SIGNUP")
 
-    def test_get_me_without_a_token_is_rejected_with_a_bearer_challenge(self):
-        with self.assertRaises(HTTPException) as context:
-            get_current_user(token=None, db=self.db)
-        error = context.exception
-
-        self.assertEqual(error.status_code, 401)
-        self.assertEqual(error.headers, {"WWW-Authenticate": "Bearer"})
-        self.assertEqual(
-            error.detail,
-            "Authentication is required. Please sign in.",
+        verified = self.client.post(
+            "/auth/signup/verify-otp",
+            json={"challenge_id": started.json()["challenge_id"], "code": self.sms.messages[0][1]},
         )
+        self.assertEqual(verified.status_code, 200)
+        payload = verified.json()
+        self.assertEqual(payload["workspace"]["business_name"], "Northwind Traders")
+        self.assertEqual(payload["workspace"]["role"], "OWNER")
+        self.assertIn("users:manage", payload["permissions"])
+        self.assertTrue(self.client.cookies.get(settings.COOKIE_NAME))
+        self.assertTrue(self.client.cookies.get(settings.CSRF_COOKIE_NAME))
+        self.assertNotIn("access_token", payload)
+        self.assertNotIn("password", str(payload).lower())
 
-    def test_get_me_with_an_expired_token_is_rejected(self):
-        now = datetime.now(timezone.utc)
-        expired_token = jwt.encode(
-            {
-                "sub": "1",
-                "iat": now - timedelta(minutes=2),
-                "exp": now - timedelta(minutes=1),
-                "token_version": 0,
+        replay = self.client.post(
+            "/auth/signup/verify-otp",
+            json={"challenge_id": started.json()["challenge_id"], "code": self.sms.messages[0][1]},
+        )
+        self.assertEqual(replay.status_code, 400)
+
+    def test_signup_enforces_confirmed_twelve_character_password(self):
+        short_password = self.client.post(
+            "/auth/signup",
+            json={
+                "full_name": "Business Owner", "business_name": "Northwind Traders", "mobile_number": "9876543210",
+                "username": "owner", "password": "too-short", "confirm_password": "too-short",
             },
-            settings.JWT_SECRET_KEY,
-            algorithm=settings.ALGORITHM,
         )
-
-        with self.assertRaises(HTTPException) as context:
-            get_current_user(token=expired_token, db=self.db)
-        error = context.exception
-
-        self.assertEqual(error.status_code, 401)
-        self.assertEqual(error.headers, {"WWW-Authenticate": "Bearer"})
-        self.assertEqual(
-            error.detail,
-            "Your session has expired. Please sign in again.",
+        mismatch = self.client.post(
+            "/auth/signup",
+            json={
+                "full_name": "Business Owner", "business_name": "Northwind Traders", "mobile_number": "9876543210",
+                "username": "owner", "password": "twelve-character-password", "confirm_password": "a-different-password",
+            },
         )
+        self.assertEqual(short_password.status_code, 400)
+        self.assertEqual(mismatch.status_code, 400)
+        self.assertEqual(self.sms.messages, [])
 
-    def test_get_me_rejects_missing_or_inactive_users(self):
-        for user_id in (99, 2):
-            with self.subTest(user_id=user_id):
-                with self.assertRaises(HTTPException) as context:
-                    get_current_user(token=create_access_token(user_id), db=self.db)
-                error = context.exception
-
-                self.assertEqual(error.status_code, 401)
-                self.assertEqual(
-                    error.detail,
-                    "Your session is no longer active. Please sign in again.",
-                )
-
-    def test_change_password_success(self):
-        response = change_password(
-            ChangePasswordRequest(
-                current_password="current-password",
-                new_password="new-secure-password",
-            ),
-            self.active_user,
-            self.db,
+    def test_login_accepts_case_insensitive_username_and_verified_mobile(self):
+        user = self.make_user(username="Owner")
+        self.make_workspace_membership(user)
+        by_username = self.client.post(
+            "/auth/login", json={"identifier": "OWNER", "password": "correct-horse-battery-staple"}
         )
+        self.assertEqual(by_username.status_code, 200)
+        self.assertEqual(by_username.json()["username"], "Owner")
+        self.assertIn("httponly", by_username.headers["set-cookie"].lower())
 
-        self.assertEqual(response, {"message": "Password changed successfully."})
-        self.assertTrue(
-            verify_password("new-secure-password", self.active_user.password_hash)
+        self.client.cookies.clear()
+        by_mobile = self.client.post(
+            "/auth/login", json={"identifier": "9876543210", "password": "correct-horse-battery-staple"}
         )
-        self.assertFalse(verify_password("current-password", self.active_user.password_hash))
-        self.assertEqual(self.active_user.token_version, 1)
-        self.assertEqual(self.db.commit_count, 1)
+        self.assertEqual(by_mobile.status_code, 200)
+        self.assertEqual(by_mobile.json()["username"], "Owner")
 
-    def test_change_password_rejects_each_invalid_request(self):
-        cases = (
-            (
-                {"current_password": "wrong-password", "new_password": "new-password"},
-                "Current password is incorrect.",
-            ),
-            (
-                {
-                    "current_password": "current-password",
-                    "new_password": "current-password",
-                },
-                "New password must differ from the current password.",
-            ),
-            (
-                {"current_password": "current-password", "new_password": "too-short"},
-                "New password must be at least 10 characters long.",
-            ),
-            (
-                {"current_password": "", "new_password": "new-password"},
-                "Current password is required.",
-            ),
+    def test_login_failures_are_generic_and_lock_after_five_attempts(self):
+        user = self.make_user(username="owner")
+        self.make_workspace_membership(user)
+        failures = [
+            self.client.post("/auth/login", json={"identifier": "owner", "password": "wrong-password"})
+            for _ in range(settings.FAILED_LOGIN_ATTEMPT_THRESHOLD)
+        ]
+        unknown = self.client.post("/auth/login", json={"identifier": "unknown", "password": "wrong-password"})
+        locked = self.client.post(
+            "/auth/login", json={"identifier": "owner", "password": "correct-horse-battery-staple"}
         )
+        self.assertTrue(all(response.status_code == 401 for response in failures))
+        self.assertEqual(unknown.status_code, 401)
+        self.assertEqual(unknown.json(), failures[0].json())
+        self.assertEqual(locked.status_code, 401)
+        self.assertEqual(locked.json(), failures[0].json())
 
-        for data, detail in cases:
-            with self.subTest(detail=detail):
-                with self.assertRaises(HTTPException) as context:
-                    change_password(
-                        ChangePasswordRequest(**data),
-                        self.active_user,
-                        self.db,
-                    )
-                error = context.exception
+    def test_expired_lock_resets_then_a_wrong_password_counts_from_one(self):
+        user = self.make_user(username="owner")
+        self.make_workspace_membership(user)
+        db = self.db()
+        stored = db.get(type(user), user.user_id)
+        stored.failed_login_count = settings.FAILED_LOGIN_ATTEMPT_THRESHOLD
+        from app.services.auth_lifecycle import utc_now
+        stored.locked_until = utc_now() - timedelta(seconds=1)
+        db.commit()
+        db.close()
 
-                self.assertEqual(error.status_code, 400)
-                self.assertEqual(error.detail, detail)
+        response = self.client.post("/auth/login", json={"identifier": "owner", "password": "wrong-password"})
+        self.assertEqual(response.status_code, 401)
+        db = self.db()
+        stored = db.get(type(user), user.user_id)
+        self.assertEqual(stored.failed_login_count, 1)
+        self.assertIsNone(stored.locked_until)
+        db.close()
 
-        self.assertEqual(self.db.commit_count, 0)
+    def test_cookie_session_requires_csrf_for_logout_and_is_revoked_on_logout(self):
+        user = self.make_user()
+        _, membership = self.make_workspace_membership(user)
+        self.authenticate_client(user, membership)
+        self.assertEqual(self.client.post("/auth/logout").status_code, 403)
+        logged_out = self.client.post("/auth/logout", headers=self.csrf_headers())
+        self.assertEqual(logged_out.status_code, 200)
+        self.assertIn("signed out", logged_out.json()["message"].lower())
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
+
+    def test_password_recovery_otp_is_single_use_and_reset_revokes_sessions(self):
+        user = self.make_user()
+        _, membership = self.make_workspace_membership(user)
+        self.authenticate_client(user, membership)
+        started = self.client.post("/auth/forgot-password", json={"mobile_number": "9876543210"})
+        self.assertEqual(started.status_code, 202)
+        verified = self.client.post(
+            "/auth/reset-password/verify-otp",
+            json={"challenge_id": started.json()["challenge_id"], "code": self.sms.messages[-1][1]},
+        )
+        self.assertEqual(verified.status_code, 200)
+        reset = self.client.post(
+            "/auth/reset-password",
+            json={
+                "reset_grant": verified.json()["reset_grant"],
+                "new_password": "a-new-twelve-character-password",
+                "confirm_password": "a-new-twelve-character-password",
+            },
+        )
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
+        replay = self.client.post(
+            "/auth/reset-password",
+            json={
+                "reset_grant": verified.json()["reset_grant"],
+                "new_password": "another-twelve-character-password",
+                "confirm_password": "another-twelve-character-password",
+            },
+        )
+        self.assertEqual(replay.status_code, 400)
+
+    def test_expired_otp_is_rejected(self):
+        started = self.client.post(
+            "/auth/signup",
+            json={
+                "full_name": "Business Owner", "business_name": "Northwind", "mobile_number": "9876543210",
+                "username": "owner", "password": "twelve-character-password", "confirm_password": "twelve-character-password",
+            },
+        )
+        db = self.db()
+        challenge = db.query(OtpChallenge).filter_by(public_id=UUID(started.json()["challenge_id"])).one()
+        from app.services.auth_lifecycle import utc_now
+        challenge.expires_at = utc_now() - timedelta(seconds=1)
+        db.commit()
+        db.close()
+        response = self.client.post(
+            "/auth/signup/verify-otp",
+            json={"challenge_id": started.json()["challenge_id"], "code": self.sms.messages[0][1]},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_otp_has_five_attempts_and_resend_invalidates_the_previous_code(self):
+        payload = {
+            "full_name": "Business Owner", "business_name": "Northwind", "mobile_number": "9876543210",
+            "username": "owner", "password": "twelve-character-password", "confirm_password": "twelve-character-password",
+        }
+        started = self.client.post("/auth/signup", json=payload)
+        challenge_id = started.json()["challenge_id"]
+        original_code = self.sms.messages[-1][1]
+        for _ in range(5):
+            wrong = self.client.post("/auth/signup/verify-otp", json={"challenge_id": challenge_id, "code": "000000"})
+            self.assertEqual(wrong.status_code, 400)
+        exhausted = self.client.post("/auth/signup/verify-otp", json={"challenge_id": challenge_id, "code": original_code})
+        self.assertEqual(exhausted.status_code, 400)
+
+        fresh = self.client.post("/auth/signup", json={**payload, "username": "owner-two"})
+        db = self.db()
+        challenge = db.query(OtpChallenge).filter_by(public_id=UUID(fresh.json()["challenge_id"])).one()
+        from app.services.auth_lifecycle import utc_now
+        challenge.sent_at = utc_now() - timedelta(seconds=31)
+        db.commit()
+        db.close()
+        previous_code = self.sms.messages[-1][1]
+        resent = self.client.post("/auth/signup/resend-otp", json={"challenge_id": fresh.json()["challenge_id"]})
+        self.assertEqual(resent.status_code, 202)
+        self.assertNotEqual(self.sms.messages[-1][1], previous_code)
+        invalidated = self.client.post(
+            "/auth/signup/verify-otp", json={"challenge_id": fresh.json()["challenge_id"], "code": previous_code}
+        )
+        self.assertEqual(invalidated.status_code, 400)
+
+    def test_change_password_revokes_the_current_session_and_requires_the_new_password(self):
+        user = self.make_user()
+        _, membership = self.make_workspace_membership(user)
+        self.authenticate_client(user, membership)
+        changed = self.client.post(
+            "/auth/change-password",
+            headers=self.csrf_headers(),
+            json={
+                "current_password": "correct-horse-battery-staple",
+                "new_password": "a-new-twelve-character-password",
+                "confirm_password": "a-new-twelve-character-password",
+            },
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(self.client.get("/auth/me").status_code, 401)
+        self.client.cookies.clear()
+        old_password = self.client.post("/auth/login", json={"identifier": "admin", "password": "correct-horse-battery-staple"})
+        new_password = self.client.post("/auth/login", json={"identifier": "admin", "password": "a-new-twelve-character-password"})
+        self.assertEqual(old_password.status_code, 401)
+        self.assertEqual(new_password.status_code, 200)
 
 
 if __name__ == "__main__":
+    import unittest
     unittest.main()

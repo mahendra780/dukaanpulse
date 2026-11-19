@@ -2,9 +2,10 @@ from sqlalchemy import BigInteger, Boolean, ForeignKey, Identity, Index, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class ProductPackaging(Base):
+class ProductPackaging(WorkspaceScoped, Base):
     __tablename__ = "product_packaging"
     __table_args__ = (
         UniqueConstraint("packaging_id", "product_id", name="uq_packaging_product_pair"),

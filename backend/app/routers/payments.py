@@ -1,3 +1,4 @@
+from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -34,6 +35,11 @@ def create_payment(
             status_code=404,
             detail="Invoice not found"
         )
+    if invoice.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Payments cannot be recorded against a cancelled invoice"
+        )
 
     # Serialize concurrent payments against the same invoice so two
     # simultaneous payments can't both pass the "remaining amount" check.
@@ -42,6 +48,12 @@ def create_payment(
         {"key": data.invoice_id}
     )
 
+    db.refresh(invoice)
+    if invoice.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Payments cannot be recorded against a cancelled invoice"
+        )
     total_paid = db.execute(
         select(
             func.coalesce(
@@ -132,8 +144,26 @@ def apply_customer_credit(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
+    if invoice.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Credit cannot be applied to a cancelled invoice"
+        )
+
     order = db.get(Order, invoice.order_id)
-    customer = db.get(Customer, order.customer_id) if order else None
+    # Lock the customer row so two applications for the same customer
+    # (even on different invoices) cannot spend the same credit twice.
+    # populate_existing makes sure we read the latest committed balance.
+    customer = (
+        db.execute(
+            select(Customer)
+            .where(Customer.customer_id == order.customer_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if order
+        else None
+    )
 
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer for this invoice not found")
@@ -169,7 +199,7 @@ def apply_customer_credit(
         payment_date=invoice.invoice_date,
         amount=amount_to_apply,
         payment_method="CREDIT_APPLIED",
-        reference_number=f"CREDIT-{customer.customer_id}",
+        reference_number=f"CREDIT-{customer.customer_id}-{invoice_id}-{uuid4().hex[:8].upper()}",
         notes=f"Applied from customer #{customer.customer_id}'s credit balance",
     )
 

@@ -598,12 +598,14 @@ def login(client: httpx.Client, username: str, password: str) -> dict[str, str]:
         "POST",
         "/auth/login",
         headers={},
-        form_data={"username": username, "password": password},
+        json_body={"identifier": username, "password": password},
     )
-    token = response.get("access_token") if isinstance(response, dict) else None
-    if not isinstance(token, str) or not token:
-        raise DemoSafetyError("Login did not return an access token.")
-    return {"Authorization": f"Bearer {token}"}
+    if not isinstance(response, dict) or not isinstance(response.get("user_id"), int):
+        raise DemoSafetyError("Login did not establish a session.")
+    csrf_token = client.cookies.get("dukaanpulse_csrf")
+    if not csrf_token:
+        raise DemoSafetyError("Login did not provide a CSRF token.")
+    return {"X-CSRF-Token": csrf_token}
 
 
 def ensure_target_is_empty(client: httpx.Client, headers: dict[str, str]) -> None:

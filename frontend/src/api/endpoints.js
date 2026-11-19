@@ -1,14 +1,21 @@
 import { api } from "./client";
 
 // ---- Authentication ----
-export const login = (username, password) => {
-  const data = new URLSearchParams({ username, password });
-  return api.post("/auth/login", data, {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  }).then((r) => r.data);
-};
+export const login = (identifier, password) => api.post("/auth/login", { identifier, password }).then((r) => r.data);
 export const getCurrentUser = () => api.get("/auth/me").then((r) => r.data);
 export const changePassword = (data) => api.post("/auth/change-password", data).then((r) => r.data);
+export const logout = () => api.post("/auth/logout").then((r) => r.data);
+export const startSignup = (data) => api.post("/auth/signup", data).then((r) => r.data);
+export const verifySignupOtp = (data) => api.post("/auth/signup/verify-otp", data).then((r) => r.data);
+export const resendSignupOtp = (data) => api.post("/auth/signup/resend-otp", data).then((r) => r.data);
+export const resendOtp = (data) => api.post("/auth/otp/resend", data).then((r) => r.data);
+export const forgotPassword = (data) => api.post("/auth/forgot-password", data).then((r) => r.data);
+export const verifyResetOtp = (data) => api.post("/auth/reset-password/verify-otp", data).then((r) => r.data);
+export const resetPassword = (data) => api.post("/auth/reset-password", data).then((r) => r.data);
+export const switchWorkspace = (data) => api.post("/auth/switch-workspace", data).then((r) => r.data);
+export const acceptInvitation = (data) => api.post("/business/invitations/accept", data).then((r) => r.data);
+export const verifyInvitationOtp = (data) => api.post("/business/invitations/verify-otp", data).then((r) => r.data);
+export const createInvitation = (data) => api.post("/business/invitations", data).then((r) => r.data);
 
 // ---- User management ----
 export const listUsers = () => api.get("/users").then((r) => r.data);
@@ -24,6 +31,11 @@ export const getTopProducts = (limit = 10) => api.get("/dashboard/top-products",
 export const getLowStock = (threshold = 100) => api.get("/dashboard/low-stock", { params: { threshold } }).then((r) => r.data);
 export const getPaymentSummary = () => api.get("/dashboard/payment-summary").then((r) => r.data);
 export const getDailySales = (sales_date) => api.get("/dashboard/sales/daily", { params: { sales_date } }).then((r) => r.data);
+
+// ---- Cash & credit intelligence ----
+export const getReceivablesReport = () => api.get("/reports/receivables").then((r) => r.data);
+export const getCustomerRiskReport = () => api.get("/reports/customer-risk").then((r) => r.data);
+export const getCashFlowReport = () => api.get("/reports/cash-flow").then((r) => r.data);
 
 // ---- Categories ----
 export const listCategories = () => api.get("/categories/").then((r) => r.data);

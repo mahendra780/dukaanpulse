@@ -8,6 +8,7 @@ import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { todayLocal } from "../lib/dates";
 import { successMessage } from "../lib/messages";
 
 
@@ -36,7 +37,7 @@ const DONE_VERB = {
 
 function CreateDeliveryModal({ deliverableInvoices, onClose, onCreated }) {
   const [invoiceId, setInvoiceId] = useState(deliverableInvoices[0]?.invoice_id ?? "");
-  const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
+  const [deliveryDate, setDeliveryDate] = useState(todayLocal());
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [addressTouched, setAddressTouched] = useState(false);
   const [vehicleNumber, setVehicleNumber] = useState("");

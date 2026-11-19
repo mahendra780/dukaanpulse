@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.auth import AuthPrincipal, get_current_principal
 from app.core.config import settings
 from app.core.permissions import require_permission
 from app.db.database import get_db
@@ -153,10 +154,11 @@ def _invoices_by_customer(inputs: AnalyticsInputs) -> dict[int, tuple]:
 )
 def get_receivables_report(
     report_today: date = Depends(get_reports_today),
+    principal: AuthPrincipal = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ):
     """Return portfolio and per-customer open receivables and D24 aging."""
-    inputs = load_report_inputs(db)
+    inputs = load_report_inputs(db, principal.workspace_id)
     portfolio = calculate_receivables_totals(
         inputs.customers, inputs.invoices, inputs.payments, report_today
     )
@@ -198,10 +200,11 @@ def get_receivables_report(
 )
 def get_customer_risk_report(
     report_today: date = Depends(get_reports_today),
+    principal: AuthPrincipal = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ):
     """Return every customer's D25 risk, explainers, and D26 suggestion."""
-    inputs = load_report_inputs(db)
+    inputs = load_report_inputs(db, principal.workspace_id)
     customer_risks = []
     for customer in inputs.customers:
         risk = calculate_customer_risk(
@@ -248,10 +251,11 @@ def get_cash_flow_report(
         description="Optional display-only opening balance; it is never stored.",
     ),
     report_today: date = Depends(get_reports_today),
+    principal: AuthPrincipal = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ):
     """Return expected cash movement for the next 5 weeks."""
-    inputs = load_report_inputs(db)
+    inputs = load_report_inputs(db, principal.workspace_id)
     projection = calculate_cash_projection(
         inputs.customers,
         inputs.invoices,

@@ -1,31 +1,19 @@
+import hashlib
+import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
 
-import jwt
-from jwt.exceptions import ExpiredSignatureError, InvalidSignatureError, InvalidTokenError
 from pwdlib import PasswordHash
 
 from app.core.config import settings
 
 
-class AccessTokenError(Exception):
-    """Base class for access-token validation errors."""
-
-
-class ExpiredAccessTokenError(AccessTokenError):
-    """Raised when an otherwise valid access token has expired."""
-
-
-class InvalidAccessTokenSignatureError(AccessTokenError):
-    """Raised when a token signature does not match the configured signing key."""
-
-
-class MalformedAccessTokenError(AccessTokenError):
-    """Raised when an access token cannot be decoded or has invalid claims."""
-
-
 password_hasher = PasswordHash.recommended()
 _dummy_password_hash = password_hasher.hash(secrets.token_urlsafe(32))
+# Development can deliberately use a process-local key so a fresh checkout
+# remains runnable before an operator creates its local configuration. It is
+# never persisted or exposed, so restarting invalidates local sessions. The
+# production settings validator requires explicit configured keys.
+_development_auth_key = secrets.token_urlsafe(48)
 
 
 def hash_password(password: str) -> str:
@@ -40,54 +28,37 @@ def verify_password_against_dummy(password: str) -> None:
     password_hasher.verify(password, _dummy_password_hash)
 
 
-def create_access_token(user_id: int, token_version: int = 0) -> str:
-    issued_at = datetime.now(timezone.utc)
-    expires_at = issued_at + timedelta(
-        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    )
-
-    return jwt.encode(
-        {
-            "sub": str(user_id),
-            "iat": issued_at,
-            "exp": expires_at,
-            "token_version": token_version,
-        },
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.ALGORITHM,
-    )
+def generate_secret() -> str:
+    return secrets.token_urlsafe(32)
 
 
-def decode_access_token(token: str) -> dict[str, object]:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-            options={"require": ["sub", "iat", "exp", "token_version"]},
-        )
-    except ExpiredSignatureError as exc:
-        raise ExpiredAccessTokenError("Access token has expired.") from exc
-    except InvalidSignatureError as exc:
-        raise InvalidAccessTokenSignatureError(
-            "Access token signature is invalid. It may have been tampered with "
-            "or signed with a different key."
-        ) from exc
-    except InvalidTokenError as exc:
-        raise MalformedAccessTokenError(
-            "Access token is malformed or has invalid claims."
-        ) from exc
+def generate_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
 
-    subject = payload.get("sub")
-    if not isinstance(subject, str) or not subject:
-        raise MalformedAccessTokenError("Access token has an invalid subject claim.")
 
-    token_version = payload.get("token_version")
-    if (
-        not isinstance(token_version, int)
-        or isinstance(token_version, bool)
-        or token_version < 0
-    ):
-        raise MalformedAccessTokenError("Access token has an invalid token version.")
+def _keyed_hash(key: str | None, value: str) -> str:
+    if not key:
+        if settings.ENVIRONMENT == "production":
+            raise RuntimeError("The required authentication secret is not configured.")
+        key = _development_auth_key
+    return hmac.new(key.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    return payload
+
+def hash_session_token(token: str) -> str:
+    return _keyed_hash(settings.SESSION_TOKEN_PEPPER, token)
+
+
+def hash_csrf_token(token: str) -> str:
+    return _keyed_hash(settings.SESSION_TOKEN_PEPPER, f"csrf:{token}")
+
+
+def hash_otp(challenge_public_id: str, code: str) -> str:
+    return _keyed_hash(settings.OTP_HMAC_KEY, f"otp:{challenge_public_id}:{code}")
+
+
+def hash_reset_or_invitation_token(token: str) -> str:
+    return _keyed_hash(settings.SESSION_TOKEN_PEPPER, f"grant:{token}")
+
+
+def constant_time_matches(expected_hash: str, actual_hash: str) -> bool:
+    return hmac.compare_digest(expected_hash, actual_hash)

@@ -1,5 +1,6 @@
+import Logo from "../components/Logo";
 import { useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { ErrorBanner } from "../components/Feedback";
 import {
   clearPostLoginPath,
@@ -16,7 +17,7 @@ export default function Login() {
   const { user, isLoading, login } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(
     location.state?.sessionExpired
@@ -39,7 +40,7 @@ export default function Login() {
     setIsSubmitting(true);
 
     try {
-      await login(username, password);
+      await login(identifier, password);
       const rememberedPath = location.state?.from || getPostLoginPath();
       clearPostLoginPath();
       navigate(isSafePath(rememberedPath) ? rememberedPath : "/", { replace: true });
@@ -53,7 +54,7 @@ export default function Login() {
   return (
     <main className="login-page">
       <section className="login-card" aria-labelledby="login-title">
-        <div className="login-brand">Dukaan<span>Pulse</span></div>
+        <div className="login-brand"><Logo /></div>
         <h1 id="login-title">Sign in</h1>
         <p>Use your DukaanPulse account to continue.</p>
 
@@ -61,13 +62,13 @@ export default function Login() {
           <ErrorBanner message={error} />
 
           <div className="field">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="identifier">Username or mobile number</label>
             <input
-              id="username"
-              name="username"
+              id="identifier"
+              name="identifier"
               type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
               autoComplete="username"
               required
               autoFocus
@@ -92,6 +93,10 @@ export default function Login() {
           <button className="btn btn-primary login-submit" type="submit" disabled={isSubmitting}>
             {isSubmitting ? "Signing in…" : "Sign in"}
           </button>
+          <div className="auth-links">
+            <Link to="/forgot-password">Forgot password?</Link>
+            <Link to="/signup">Create a business account</Link>
+          </div>
         </form>
       </section>
     </main>

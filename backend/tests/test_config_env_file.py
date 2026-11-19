@@ -14,7 +14,12 @@ class ConfigEnvironmentFileTests(unittest.TestCase):
                 "\n".join(
                     (
                         "DATABASE_URL=postgresql+psycopg://demo:demo@localhost/demo",
-                        "JWT_SECRET_KEY=this-is-a-test-only-key-with-more-than-32-characters",
+                        "SESSION_TOKEN_PEPPER=this-is-a-test-only-session-key-with-more-than-32-characters",
+                        "OTP_HMAC_KEY=this-is-a-test-only-otp-key-with-more-than-32-characters",
+                        "COOKIE_SECURE=true",
+                        "SMS_PROVIDER=generic_http",
+                        "SMS_HTTP_URL=https://sms.invalid/send",
+                        "SMS_HTTP_AUTHORIZATION=test-only",
                         "ENVIRONMENT=production",
                     )
                 ),
@@ -24,6 +29,12 @@ class ConfigEnvironmentFileTests(unittest.TestCase):
             environment["DUKAANPULSE_ENV_FILE"] = str(env_file)
             environment.pop("DATABASE_URL", None)
             environment.pop("JWT_SECRET_KEY", None)
+            environment.pop("SESSION_TOKEN_PEPPER", None)
+            environment.pop("OTP_HMAC_KEY", None)
+            environment.pop("COOKIE_SECURE", None)
+            environment.pop("SMS_PROVIDER", None)
+            environment.pop("SMS_HTTP_URL", None)
+            environment.pop("SMS_HTTP_AUTHORIZATION", None)
             environment.pop("ENVIRONMENT", None)
             result = subprocess.run(
                 [
@@ -47,7 +58,8 @@ class ConfigEnvironmentFileTests(unittest.TestCase):
                 "\n".join(
                     (
                         "DATABASE_URL=postgresql+psycopg://demo:demo@localhost/demo",
-                        "JWT_SECRET_KEY=this-is-a-test-only-key-with-more-than-32-characters",
+                        "SESSION_TOKEN_PEPPER=this-is-a-test-only-session-key-with-more-than-32-characters",
+                        "OTP_HMAC_KEY=this-is-a-test-only-otp-key-with-more-than-32-characters",
                         "BUSINESS_TIMEZONE=Not/ARealTimezone",
                     )
                 ),

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import {
-  createUser,
+  createInvitation,
   listUsers,
   resetUserPassword,
   updateUser,
@@ -26,26 +26,21 @@ function formatLastLogin(value) {
   return new Date(value).toLocaleString();
 }
 
-function CreateUserModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({
-    username: "",
-    full_name: "",
-    role: "VIEWER",
-    initial_password: "",
-  });
+function CreateInvitationModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({ mobile_number: "", role: "VIEWER" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [invitationLink, setInvitationLink] = useState("");
   const toast = useToast();
 
   const submit = async (event) => {
     event.preventDefault();
     setError("");
     setSaving(true);
-
     try {
-      await createUser(form);
-      toast.success(successMessage("User", "added"));
-      onCreated();
+      const result = await createInvitation(form);
+      setInvitationLink(`${window.location.origin}/invitation/accept?token=${encodeURIComponent(result.invitation_token)}`);
+      toast.success(successMessage("Invitation", "created"));
     } catch (requestError) {
       setError(extractErrorMessage(requestError));
     } finally {
@@ -54,65 +49,26 @@ function CreateUserModal({ onClose, onCreated }) {
   };
 
   return (
-    <Modal title="Add user" onClose={onClose}>
+    <Modal title="Invite staff member" onClose={onClose}>
       <form onSubmit={submit}>
         <ErrorBanner message={error} />
+        <p className="field-help">The invitee verifies this mobile number before joining. Share the one-time link using your approved channel.</p>
         <div className="field-row">
           <div className="field">
-            <label>Username</label>
-            <input
-              value={form.username}
-              onChange={(event) => setForm({ ...form, username: event.target.value })}
-              autoComplete="username"
-              maxLength={50}
-              required
-              disabled={saving}
-            />
+            <label>Mobile number</label>
+            <input value={form.mobile_number} onChange={(event) => setForm({ ...form, mobile_number: event.target.value })} autoComplete="tel" required disabled={saving || Boolean(invitationLink)} />
           </div>
-          <div className="field">
-            <label>Full name</label>
-            <input
-              value={form.full_name}
-              onChange={(event) => setForm({ ...form, full_name: event.target.value })}
-              autoComplete="name"
-              maxLength={100}
-              required
-              disabled={saving}
-            />
-          </div>
-        </div>
-        <div className="field-row">
           <div className="field">
             <label>Role</label>
-            <select
-              value={form.role}
-              onChange={(event) => setForm({ ...form, role: event.target.value })}
-              disabled={saving}
-            >
+            <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} disabled={saving || Boolean(invitationLink)}>
               {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
             </select>
           </div>
-          <div className="field">
-            <label>Initial password</label>
-            <input
-              type="password"
-              value={form.initial_password}
-              onChange={(event) => setForm({ ...form, initial_password: event.target.value })}
-              autoComplete="new-password"
-              minLength={10}
-              required
-              disabled={saving}
-            />
-          </div>
         </div>
-
+        {invitationLink && <div className="field"><label>One-time invitation link</label><input value={invitationLink} readOnly onFocus={(event) => event.target.select()} /><div className="field-help">Copy this link now. It is not shown again.</div></div>}
         <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Adding user…" : "Add user"}
-          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => { onClose(); onCreated(); }} disabled={saving}>{invitationLink ? "Done" : "Cancel"}</button>
+          {!invitationLink && <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Creating invitation…" : "Create invitation"}</button>}
         </div>
       </form>
     </Modal>
@@ -252,7 +208,7 @@ function ResetPasswordModal({ user, onClose, onReset }) {
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             autoComplete="new-password"
-            minLength={10}
+            minLength={12}
             required
             disabled={saving}
           />
@@ -264,7 +220,7 @@ function ResetPasswordModal({ user, onClose, onReset }) {
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             autoComplete="new-password"
-            minLength={10}
+            minLength={12}
             required
             disabled={saving}
           />
@@ -310,7 +266,7 @@ export default function Users() {
           <p>{users.length} user{users.length === 1 ? "" : "s"}</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={15} /> Add user
+          <Plus size={15} /> Invite staff
         </button>
       </div>
 
@@ -319,7 +275,7 @@ export default function Users() {
       {loading ? (
         <Spinner />
       ) : users.length === 0 ? (
-        <EmptyState label="No users found. Add a user to give someone access." />
+        <EmptyState label="No staff members found. Invite a staff member to give access." />
       ) : (
         <div className="table-wrap">
           <table>
@@ -360,7 +316,7 @@ export default function Users() {
       )}
 
       {showCreate && (
-        <CreateUserModal
+        <CreateInvitationModal
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);

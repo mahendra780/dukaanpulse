@@ -43,7 +43,7 @@ class AnalyticsInputs:
     supplier_payments: tuple[SupplierPaymentInput, ...]
 
 
-def load_report_inputs(db: Session) -> AnalyticsInputs:
+def load_report_inputs(db: Session, workspace_id: int | None = None) -> AnalyticsInputs:
     """Load all report inputs with a fixed number of bulk queries.
 
     ``payment_method`` is intentionally selected for every customer payment:
@@ -51,7 +51,7 @@ def load_report_inputs(db: Session) -> AnalyticsInputs:
     CREDIT_APPLIED rows.  Do not replace these queries with per-customer
     relationship loads; that would make report cost grow with customer count.
     """
-    customer_rows = db.execute(
+    customer_query = (
         select(
             Customer.customer_id,
             Customer.customer_name,
@@ -59,8 +59,8 @@ def load_report_inputs(db: Session) -> AnalyticsInputs:
             Customer.credit_balance,
             Customer.payment_terms_days,
         ).order_by(Customer.customer_id)
-    ).all()
-    invoice_rows = db.execute(
+    )
+    invoice_query = (
         select(
             Invoice.invoice_id,
             Invoice.invoice_date,
@@ -70,8 +70,8 @@ def load_report_inputs(db: Session) -> AnalyticsInputs:
         )
         .join(Order, Invoice.order_id == Order.order_id)
         .order_by(Invoice.invoice_id)
-    ).all()
-    payment_rows = db.execute(
+    )
+    payment_query = (
         select(
             Payment.payment_id,
             Payment.invoice_id,
@@ -79,15 +79,15 @@ def load_report_inputs(db: Session) -> AnalyticsInputs:
             Payment.amount,
             Payment.payment_method,
         ).order_by(Payment.payment_id)
-    ).all()
-    supplier_rows = db.execute(
+    )
+    supplier_query = (
         select(
             Supplier.supplier_id,
             Supplier.supplier_name,
             Supplier.payment_terms_days,
         ).order_by(Supplier.supplier_id)
-    ).all()
-    purchase_rows = db.execute(
+    )
+    purchase_query = (
         select(
             Purchase.purchase_id,
             Purchase.supplier_id,
@@ -95,15 +95,28 @@ def load_report_inputs(db: Session) -> AnalyticsInputs:
             Purchase.total_amount,
             Purchase.status,
         ).order_by(Purchase.purchase_id)
-    ).all()
-    supplier_payment_rows = db.execute(
+    )
+    supplier_payment_query = (
         select(
             PurchasePayment.purchase_payment_id,
             PurchasePayment.purchase_id,
             PurchasePayment.payment_date,
             PurchasePayment.amount,
         ).order_by(PurchasePayment.purchase_payment_id)
-    ).all()
+    )
+    if workspace_id is not None:
+        customer_query = customer_query.where(Customer.workspace_id == workspace_id)
+        invoice_query = invoice_query.where(Invoice.workspace_id == workspace_id)
+        payment_query = payment_query.where(Payment.workspace_id == workspace_id)
+        supplier_query = supplier_query.where(Supplier.workspace_id == workspace_id)
+        purchase_query = purchase_query.where(Purchase.workspace_id == workspace_id)
+        supplier_payment_query = supplier_payment_query.where(PurchasePayment.workspace_id == workspace_id)
+    customer_rows = db.execute(customer_query).all()
+    invoice_rows = db.execute(invoice_query).all()
+    payment_rows = db.execute(payment_query).all()
+    supplier_rows = db.execute(supplier_query).all()
+    purchase_rows = db.execute(purchase_query).all()
+    supplier_payment_rows = db.execute(supplier_payment_query).all()
 
     return AnalyticsInputs(
         customers=tuple(

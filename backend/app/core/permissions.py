@@ -2,12 +2,12 @@ from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status
 
-from app.core.auth import get_current_user
-from app.core.roles import ROLES
-from app.models.user import User
+from app.core.auth import AuthPrincipal, get_current_principal
+from app.core.roles import ROLES, WORKSPACE_ROLES
 
 
 ADMIN, SALES, WAREHOUSE, ACCOUNTS, VIEWER = ROLES
+OWNER = WORKSPACE_ROLES[0]
 
 _READ_RESOURCES = frozenset(
     {
@@ -49,8 +49,11 @@ ALL_PERMISSIONS = frozenset(
     | {"returns:approve", "returns:receive", "system:read", "users:manage"}
 )
 
+_WORKSPACE_ADMIN_PERMISSIONS = ALL_PERMISSIONS - {"system:read"}
+
 ROLE_PERMISSIONS = {
-    ADMIN: ALL_PERMISSIONS,
+    OWNER: _WORKSPACE_ADMIN_PERMISSIONS,
+    ADMIN: _WORKSPACE_ADMIN_PERMISSIONS,
     SALES: frozenset(
         {
             "categories:read",
@@ -122,7 +125,11 @@ ROLE_PERMISSIONS = {
 ANY_LOGGED_IN = frozenset(
     {
         ("GET", "/auth/me"),
+        ("POST", "/auth/logout"),
+        ("POST", "/auth/switch-workspace"),
         ("POST", "/auth/change-password"),
+        ("GET", "/auth/sessions"),
+        ("DELETE", "/auth/sessions/{session_id}"),
     }
 )
 
@@ -131,19 +138,23 @@ def permissions_for_role(role: str) -> list[str]:
     return sorted(ROLE_PERMISSIONS.get(role, ()))
 
 
+def permissions_for_principal(principal: AuthPrincipal) -> list[str]:
+    return permissions_for_role(principal.membership.role)
+
+
 def require_permission(permission: str) -> Callable:
     if permission not in ALL_PERMISSIONS:
         raise ValueError(f"Unknown permission: {permission}")
 
     def permission_dependency(
-        current_user: User = Depends(get_current_user),
-    ) -> User:
-        if permission not in ROLE_PERMISSIONS.get(current_user.role, ()):
+        principal: AuthPrincipal = Depends(get_current_principal),
+    ) -> AuthPrincipal:
+        if permission not in permissions_for_principal(principal):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to do this.",
             )
-        return current_user
+        return principal
 
     permission_dependency.required_permission = permission
     return permission_dependency

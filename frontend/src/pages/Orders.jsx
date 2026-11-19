@@ -9,6 +9,7 @@ import ProductPackagingSelect from "../components/ProductPackagingSelect";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { todayLocal } from "../lib/dates";
 import { successMessage } from "../lib/messages";
 
 const emptyItem = () => ({ product_id: "", packaging_id: "", quantity: "" });
@@ -44,7 +45,7 @@ function availableStock(products, productId, packagingId) {
 
 function CreateOrderModal({ customers, products, onClose, onCreated }) {
   const [customerId, setCustomerId] = useState(customers[0]?.customer_id ?? "");
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
+  const [orderDate, setOrderDate] = useState(todayLocal());
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState([emptyItem()]);
   const [error, setError] = useState("");

@@ -17,9 +17,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Purchase(Base):
+class Purchase(WorkspaceScoped, Base):
     __tablename__ = "purchases"
     __table_args__ = (
         UniqueConstraint(
@@ -102,7 +103,7 @@ class Purchase(Base):
     )
 
 
-class PurchaseItem(Base):
+class PurchaseItem(WorkspaceScoped, Base):
     __tablename__ = "purchase_items"
     __table_args__ = (
         ForeignKeyConstraint(

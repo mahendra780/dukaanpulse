@@ -9,7 +9,7 @@ export default function ProtectedRoute() {
   if (isLoading) {
     return (
       <div className="auth-loading">
-        <Spinner label="Checking your session…" />
+        <Spinner label="Checking your session…" variant="text" />
       </div>
     );
   }

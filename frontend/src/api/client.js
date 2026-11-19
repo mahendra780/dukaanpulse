@@ -1,25 +1,18 @@
 import axios from "axios";
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-const ACCESS_TOKEN_KEY = "dukaanpulse.accessToken";
 const POST_LOGIN_PATH_KEY = "dukaanpulse.postLoginPath";
+const CSRF_COOKIE_NAME = "dukaanpulse_csrf";
 
 let unauthorizedHandler = null;
 
 // A timeout means a hung request ends in a clear message instead of a
 // loading state that never finishes.
-export const api = axios.create({ baseURL, timeout: 30000 });
-
-export function getStoredToken() {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
-}
-
-export function storeToken(token) {
-  localStorage.setItem(ACCESS_TOKEN_KEY, token);
-}
+export const api = axios.create({ baseURL, timeout: 30000, withCredentials: true });
 
 export function clearStoredSession() {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  // Authentication lives in HttpOnly cookies. This exists so callers can
+  // clear only their in-memory UI state without touching browser storage.
 }
 
 export function getPostLoginPath() {
@@ -43,25 +36,47 @@ function isLoginRequest(config) {
   return config?.method?.toLowerCase() === "post" && url === "/auth/login";
 }
 
+// The first thing the app does is ask "am I signed in?". A 401 there only
+// means "no", which is normal for someone visiting the landing page or the
+// signup form. Only a 401 on a real request means the session expired.
+function isSessionCheck(config) {
+  const url = config?.url?.split("?")[0]?.replace(/\/+$/, "");
+  return config?.method?.toLowerCase() === "get" && url === "/auth/me";
+}
+
 function rememberCurrentPath() {
   const path = window.location.pathname + window.location.search + window.location.hash;
   sessionStorage.setItem(POST_LOGIN_PATH_KEY, path);
 }
 
 api.interceptors.request.use((config) => {
-  const token = getStoredToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const method = config.method?.toLowerCase();
+  if (method && !["get", "head", "options"].includes(method)) {
+    clearApiCache();
+    const csrfToken = document.cookie
+      .split("; ")
+      .find((entry) => entry.startsWith(`${CSRF_COOKIE_NAME}=`))
+      ?.split("=")
+      .slice(1)
+      .join("=");
+    if (csrfToken) {
+      config.headers["X-CSRF-Token"] = decodeURIComponent(csrfToken);
+    }
   }
   return config;
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = response.config?.method?.toLowerCase();
+    if (method && !["get", "head", "options"].includes(method)) clearApiCache();
+    return response;
+  },
   (error) => {
     if (
       error?.response?.status === 401 &&
       !isLoginRequest(error.config) &&
+      !isSessionCheck(error.config) &&
       window.location.pathname !== "/login"
     ) {
       rememberCurrentPath();
@@ -72,6 +87,67 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ---- Short-lived cache for GET requests ----
+// Without this every click on a sidebar link mounted the page again and
+// asked the server for everything again. Now a repeat visit within
+// CACHE_TTL_MS is answered instantly, identical requests that are already
+// in flight share one network call, and any change (POST, PATCH, DELETE...)
+// clears the cache so lists never show stale data after you edit something.
+const CACHE_TTL_MS = 30000;
+const responseCache = new Map();
+const inFlight = new Map();
+let cacheEpoch = 0;
+
+export function clearApiCache() {
+  cacheEpoch += 1;
+  responseCache.clear();
+  inFlight.clear();
+}
+
+const copyResponse = ({ data, status, statusText }) => ({
+  data: structuredClone(data),
+  status,
+  statusText,
+});
+
+const networkGet = api.get.bind(api);
+
+api.get = (url, config = {}) => {
+  // Login state must always be fresh.
+  if (config.cache === false || String(url).startsWith("/auth")) {
+    return networkGet(url, config);
+  }
+
+  const key = `${url}?${JSON.stringify(config.params ?? {})}`;
+  const hit = responseCache.get(key);
+  if (hit && Date.now() - hit.time < CACHE_TTL_MS) {
+    return Promise.resolve(copyResponse(hit.response));
+  }
+
+  const pending = inFlight.get(key);
+  if (pending) return pending.then(copyResponse);
+
+  const epoch = cacheEpoch;
+  const request = networkGet(url, config)
+    .then((response) => {
+      const stored = {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+      if (epoch === cacheEpoch) {
+        responseCache.set(key, { time: Date.now(), response: stored });
+      }
+      return copyResponse(stored);
+    })
+    .finally(() => {
+      if (inFlight.get(key) === request) inFlight.delete(key);
+    });
+
+  inFlight.set(key, request);
+  return request.then(copyResponse);
+};
 
 const STATUS_FALLBACKS = {
   400: "The information provided is not valid. Please check your details and try again.",

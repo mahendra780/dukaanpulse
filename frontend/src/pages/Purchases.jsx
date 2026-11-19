@@ -9,6 +9,7 @@ import ProductPackagingSelect from "../components/ProductPackagingSelect";
 import { useToast } from "../components/ToastProvider";
 import { useConfirm } from "../components/ConfirmProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { todayLocal } from "../lib/dates";
 import { successMessage } from "../lib/messages";
 
 const emptyItem = () => ({ product_id: "", packaging_id: "", quantity: "", unit_price: "", discount: "", tax: "" });
@@ -16,7 +17,7 @@ const lineTotal = (it) => Number(it.quantity || 0) * Number(it.unit_price || 0) 
 
 function CreatePurchaseModal({ suppliers, products, onClose, onCreated }) {
   const [supplierId, setSupplierId] = useState(suppliers[0]?.supplier_id ?? "");
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [purchaseDate, setPurchaseDate] = useState(todayLocal());
   const [invoiceNo, setInvoiceNo] = useState("");
   const [items, setItems] = useState([emptyItem()]);
   const [error, setError] = useState("");

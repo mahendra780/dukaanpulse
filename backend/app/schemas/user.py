@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class UserCreate(BaseModel):
+    """Legacy contract retained only to return the invitation guidance."""
     username: str
     full_name: str
     role: str
@@ -27,6 +28,7 @@ class ManagedUserResponse(BaseModel):
     full_name: str
     role: str
     status: str
+    membership_status: str
     created_at: datetime
     last_login_at: datetime | None
 

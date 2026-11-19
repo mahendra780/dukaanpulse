@@ -68,7 +68,7 @@ export default function InvoiceDetail() {
     }
   };
 
-  if (loading) return <Spinner />;
+  if (loading) return <Spinner variant="page" />;
   if (error && !invoice) return <ErrorBanner message={error} />;
   if (!invoice) return null;
 

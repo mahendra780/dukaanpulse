@@ -2,11 +2,12 @@ from fastapi import FastAPI, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import csrf_protect, get_current_user, require_workspace
 from app.core.config import settings
 from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.routers.auth import router as auth_router
+from app.routers.business import router as business_router
 from app.routers.categories import router as categories_router
 from app.routers.products import router as products_router
 from app.routers.customers import router as customers_router
@@ -35,26 +36,28 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token"],
 )
 
 app.include_router(auth_router)
-app.include_router(categories_router, dependencies=[Depends(get_current_user)])
-app.include_router(products_router, dependencies=[Depends(get_current_user)])
-app.include_router(customers_router, dependencies=[Depends(get_current_user)])
-app.include_router(suppliers_router, dependencies=[Depends(get_current_user)])
-app.include_router(purchases_router, dependencies=[Depends(get_current_user)])
-app.include_router(inventory_router, dependencies=[Depends(get_current_user)])
-app.include_router(orders_router, dependencies=[Depends(get_current_user)])
-app.include_router(invoices_router, dependencies=[Depends(get_current_user)])
-app.include_router(deliveries_router, dependencies=[Depends(get_current_user)])
-app.include_router(payments_router, dependencies=[Depends(get_current_user)])
-app.include_router(purchase_payments_router, dependencies=[Depends(get_current_user)])
-app.include_router(returns_router, dependencies=[Depends(get_current_user)])
-app.include_router(users_router, dependencies=[Depends(get_current_user)])
-app.include_router(dashboard.router, dependencies=[Depends(get_current_user)])
-app.include_router(reports_router, dependencies=[Depends(get_current_user)])
+app.include_router(business_router)
+_workspace_dependencies = [Depends(require_workspace), Depends(csrf_protect)]
+app.include_router(categories_router, dependencies=_workspace_dependencies)
+app.include_router(products_router, dependencies=_workspace_dependencies)
+app.include_router(customers_router, dependencies=_workspace_dependencies)
+app.include_router(suppliers_router, dependencies=_workspace_dependencies)
+app.include_router(purchases_router, dependencies=_workspace_dependencies)
+app.include_router(inventory_router, dependencies=_workspace_dependencies)
+app.include_router(orders_router, dependencies=_workspace_dependencies)
+app.include_router(invoices_router, dependencies=_workspace_dependencies)
+app.include_router(deliveries_router, dependencies=_workspace_dependencies)
+app.include_router(payments_router, dependencies=_workspace_dependencies)
+app.include_router(purchase_payments_router, dependencies=_workspace_dependencies)
+app.include_router(returns_router, dependencies=_workspace_dependencies)
+app.include_router(users_router, dependencies=_workspace_dependencies)
+app.include_router(dashboard.router, dependencies=_workspace_dependencies)
+app.include_router(reports_router, dependencies=_workspace_dependencies)
 @app.get("/")
 def root():
     return {

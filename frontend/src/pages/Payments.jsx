@@ -6,6 +6,7 @@ import { Spinner, EmptyState, ErrorBanner } from "../components/Feedback";
 import Modal from "../components/Modal";
 import { useToast } from "../components/ToastProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { todayLocal } from "../lib/dates";
 import { successMessage } from "../lib/messages";
 
 
@@ -14,7 +15,7 @@ const currency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 function CreatePaymentModal({ payableInvoices, remainingByInvoice, onClose, onCreated }) {
   const [invoiceId, setInvoiceId] = useState(payableInvoices[0]?.invoice_id ?? "");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(todayLocal());
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
   const [referenceNumber, setReferenceNumber] = useState("");

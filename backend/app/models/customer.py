@@ -4,9 +4,10 @@ from sqlalchemy import BigInteger, DateTime, Identity, Integer, Numeric, String,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Customer(Base):
+class Customer(WorkspaceScoped, Base):
     __tablename__ = "customers"
 
     customer_id: Mapped[int] = mapped_column(

@@ -22,17 +22,22 @@ How to use this document:
 Backend (backend/): FastAPI, SQLAlchemy 2.0 (Mapped / mapped_column), Pydantic v2,
 PostgreSQL via psycopg v3 (hosted on Neon, any Postgres works).
 
-- app/main.py: app setup, CORS (allows http://localhost:5173), includes all routers
-- app/core/config.py: settings read from .env (DATABASE_URL)
+- app/main.py: app setup, authenticated routers, CORS from
+  `CORS_ALLOWED_ORIGINS`, and development-only API documentation routes
+- app/core/config.py: settings read from `.env`/environment, including
+  `DATABASE_URL`, `JWT_SECRET_KEY`, token lifetime, environment, CORS, and
+  lockout settings
 - app/db/database.py: engine, SessionLocal, Base, get_db
 - app/models/: SQLAlchemy models. app/models/__init__.py must import EVERY model
   (needed so relationship("Name") strings resolve). New model: register it there.
 - app/schemas/: Pydantic request/response models
-- app/routers/: one file per resource (categories, products, customers, suppliers,
-  purchases, inventory, orders, invoices, deliveries, payments, purchase_payments,
-  returns, dashboard). New router: include it in main.py.
+- app/routers/: one file per resource (auth, users, categories, products,
+  customers, suppliers, purchases, inventory, orders, invoices, deliveries,
+  payments, purchase_payments, returns, dashboard, reports). New router:
+  include it in main.py.
 - app/services/: shared business logic (inventory_service, invoice_service,
-  order_service, purchase_service, return_service, status_rules)
+  order_service, purchase_service, return_service, status_rules) and
+  services/analytics/ (bulk loaders, pure calculations, and report settings).
 
 Frontend (frontend/): React 18, Vite, react-router-dom 6, axios, recharts,
 lucide-react. Plain JavaScript (no TypeScript), plain CSS in src/index.css with
@@ -40,12 +45,15 @@ design tokens (no Tailwind, no UI library).
 
 - src/api/client.js: axios instance (30 s timeout) + extractErrorMessage()
 - src/api/endpoints.js: one function per backend endpoint
-- src/pages/: Dashboard, Products, Customers, Suppliers, Purchases, Orders,
+- src/pages/: Login, Dashboard, Products, Customers, Suppliers, Purchases, Orders,
   Invoices, InvoiceDetail, Deliveries, Payments (customer payments),
-  PurchasePayments (supplier payments), Returns, Inventory (stock lookup)
+  PurchasePayments (supplier payments), Returns, Inventory (stock lookup),
+  CashCredit, Users
+- src/auth/: AuthProvider and protected-route support; the frontend reads the
+  permission list returned by `/auth/me` and does not duplicate the role matrix
 - src/components/: Layout, Modal, Feedback (Spinner/EmptyState/ErrorBanner),
   StatCard, StatusBadge, ProductPackagingSelect, ToastProvider, ConfirmProvider,
-  ErrorBoundary
+  ErrorBoundary, ChangePasswordModal, ProtectedRoute
 - src/lib/: messages.js, formValidation.js
 
 ## 2. Running it
@@ -54,11 +62,10 @@ Backend:
   cd backend
   python -m venv venv  (activate it)
   pip install -r requirements.txt
-  copy .env.example to .env and set DATABASE_URL (psycopg v3 driver, so the URL
-  normally looks like postgresql+psycopg://user:pass@host/db?sslmode=require;
-  check .env.example)
+  copy .env.example to .env and set DATABASE_URL and JWT_SECRET_KEY
   uvicorn app.main:app --reload --port 8000
-  API docs: http://127.0.0.1:8000/docs   health: /health and /health/db
+  API docs (development only): http://127.0.0.1:8000/docs
+  health: /health; /health/db additionally requires system:read
 
 Frontend:
   cd frontend
@@ -66,14 +73,48 @@ Frontend:
   copy .env.example to .env  (VITE_API_BASE_URL=http://127.0.0.1:8000)
   npm run dev   (http://localhost:5173)
 
-IMPORTANT: there are no migrations and no create_all(). The database schema
-must already exist: load schema.sql into an empty Postgres database first. The app
-also needs at least ONE row in `categories` before a product can be added
-(there is no category-creation endpoint). Example:
-  INSERT INTO categories (category_name, status) VALUES ('General', 'ACTIVE');
-(check the real column names in schema.sql.)
+IMPORTANT: there is no automatic migration runner or `create_all()`. The
+baseline dump is `backend/sql/000_baseline_schema.sql` (reference only for an
+existing database); additive migrations run manually in order: 001 creates
+users, 002 adds `token_version`, and 003 adds login-lockout fields. Do not run
+the baseline dump as a migration against an existing database. Categories can
+be created from the Products page by a user with `categories:write`.
 
-## 3. Core design
+## 3. Authentication and authorization
+
+- Public backend routes are `GET /`, `GET /health`, and `POST /auth/login`.
+  The documentation routes are public only outside production. All business
+  routers require login; individual routes also require backend permissions.
+- Login uses a case-insensitive username and a form-encoded OAuth2 password
+  request. There is no self-registration. Passwords are hashed with Argon2 via
+  `pwdlib`, and passwords need at least 10 characters.
+- Access tokens are HS256 JWTs with `sub`, `iat`, `exp`, and `token_version`.
+  The server loads the user on every authenticated request, rejects missing or
+  inactive users, and compares the JWT `token_version` with the database value.
+  Self-service password change and an ADMIN password reset increment that value,
+  invalidating older tokens.
+- Login failures use the same generic message for unknown usernames, wrong
+  passwords, inactive accounts, and locked accounts. Unknown usernames use a
+  dummy password hash check. Active accounts lock after the configured number
+  of consecutive bad passwords (default five) for the configured duration
+  (default 15 minutes); success clears the counter and lock timestamp.
+- Roles are `ADMIN`, `SALES`, `WAREHOUSE`, `ACCOUNTS`, and `VIEWER`. The sole
+  backend role-to-permission matrix is `app/core/permissions.py`; `/auth/me`
+  returns its permission list for frontend display decisions, while the backend
+  remains the authority. ADMIN has `users:manage` and can create users, update
+  names/roles/statuses, and reset another user's password.
+- Users cannot deactivate/demote themselves, and the last active ADMIN cannot
+  be deactivated or demoted. The first ADMIN is created with
+  `python -m app.scripts.create_admin` from `backend/`.
+- `POST /categories/` creates a category for `categories:write`; the Products
+  page contains the Add category form. Category reading requires
+  `categories:read`.
+- `GET /reports/receivables`, `/reports/customer-risk`, and
+  `/reports/cash-flow` require `reports:read` (ADMIN and ACCOUNTS). The
+  Cash & Credit page calls only these endpoints, receives an as-of date plus
+  methodology, and does not duplicate the role matrix.
+
+## 4. Core design
 
 - Inventory is an append-only ledger: table inventory_movements. Stock of a
   product = SUM(base_quantity). Quantities are stored in the product's BASE unit.
@@ -92,7 +133,7 @@ also needs at least ONE row in `categories` before a product can be added
   (order_service.recalculate_order_status), purchase status
   (purchase_service.recalculate_purchase_status). Don't set them by hand elsewhere.
 
-## 4. Business rules (the part that's easy to break)
+## 5. Business rules (the part that's easy to break)
 
 Purchases: statuses PENDING, PARTIALLY_RECEIVED, RECEIVED, CANCELLED. Always
 created PENDING with received_quantity 0. Stock is added ONLY when goods are
@@ -146,7 +187,16 @@ Dashboard: purchase totals count only RECEIVED and PARTIALLY_RECEIVED purchases.
 Pending amount is computed per invoice and floored at 0; refund_due_amount and
 total_customer_credit are reported separately.
 
-## 5. Conventions to follow
+Cash & Credit Intelligence: analytics loaders issue six fixed bulk queries and
+pass plain data rows to pure calculations. Receivables keep customer credit
+separate from outstanding and overdue. Risk is a transparent rule-based 0-100
+score that needs at least three settled invoices in the last 180 days; otherwise
+the band is INSUFFICIENT_HISTORY and no score or credit-limit suggestion is
+invented. The next-5-weeks projection is expected movement only, not cash on
+hand. Suggestions are never applied automatically. Exact definitions,
+thresholds, examples, and limitations are in docs/analytics-methodology.md.
+
+## 6. Conventions to follow
 
 Backend:
 
@@ -174,10 +224,12 @@ Frontend:
 - formValidation.js produces friendly browser validation messages by reading each
   field's <label></label> inside a `.field` wrapper (or its placeholder). Keep that markup.
 
-## 6. Known gaps (not bugs you introduced)
+## 7. Known gaps (not bugs you introduced)
 
-- No authentication or authorization at all; every endpoint is open.
-- No category create/edit endpoint or page. No automated tests. No migrations.
+- No per-IP rate limiting, MFA, password recovery, audit log, or forced password
+  change for administrator-created/reset users.
+- Categories can be created, but there is no category edit endpoint or separate
+  Categories page. Backend tests use fake sessions; they do not run against Neon.
 - No inventory-movement history endpoint/page (only GET /inventory/stock/{id}); no
   endpoints for opening stock, damage or manual adjustments.
 - Deliveries have no line items (no partial delivery per invoice).
@@ -187,10 +239,10 @@ Frontend:
 - The toast / confirm-dialog / validation / modal-accessibility layer was added
   late and was only syntax-checked and logic-tested in isolation, not
   verified in a real browser. Treat it as lightly tested.
-- Planned but not built: reports (customer receivables with aging, supplier
-  payables, stock valuation). Profit/margin reports need a costing method decided first.
+- Cash & Credit Intelligence is built, but supplier-payables and stock-valuation
+  reporting are not. Profit/margin reports need a costing method decided first.
 
-## 7. Working agreements for you
+## 8. Working agreements for you
 
 - Prefer small, reviewable changes; show the exact files or diffs you changed.
 - Before changing the database, explain why and give the SQL for the human to run.

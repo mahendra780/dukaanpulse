@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal
 
 
 class CustomerCreate(BaseModel):
@@ -8,6 +9,7 @@ class CustomerCreate(BaseModel):
     area: str = Field(max_length=100)
     credit_limit: float = Field(default=0, ge=0)
     payment_terms_days: int = Field(default=0, ge=0)
+    status: Literal["ACTIVE", "INACTIVE"] = "ACTIVE"
 
 
 # ⭐ New Schema
@@ -24,5 +26,6 @@ class CustomerUpdate(BaseModel):
 class CustomerResponse(CustomerCreate):
     customer_id: int
     status: str
+    credit_balance: float = 0
 
     model_config = ConfigDict(from_attributes=True)

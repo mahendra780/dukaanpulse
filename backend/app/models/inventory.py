@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Identity,
     Numeric,
     String,
     Text,
@@ -12,13 +13,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class InventoryMovement(Base):
+class InventoryMovement(WorkspaceScoped, Base):
     __tablename__ = "inventory_movements"
 
     movement_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -52,11 +55,13 @@ class InventoryMovement(Base):
 
     invoice_item_id: Mapped[int | None] = mapped_column(
         BigInteger,
+        ForeignKey("invoice_items.invoice_item_id"),
         nullable=True
     )
 
     return_item_id: Mapped[int | None] = mapped_column(
         BigInteger,
+        ForeignKey("return_items.return_item_id"),
         nullable=True
     )
 

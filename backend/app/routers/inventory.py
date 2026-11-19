@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.inventory import InventoryMovement
 from app.models.product import Product
@@ -14,12 +15,12 @@ router = APIRouter(
 )
 
 
-@router.get("/stock/{product_id}")
+@router.get("/stock/{product_id}", dependencies=[Depends(require_permission("inventory:read"))])
 def get_product_stock(
     product_id: int,
     db: Session = Depends(get_db)
 ):
-    # Product check
+
     product = db.get(Product, product_id)
 
     if not product:
@@ -28,7 +29,6 @@ def get_product_stock(
             detail="Product not found"
         )
 
-    # Calculate current stock
     result = db.execute(
         select(
             func.coalesce(
@@ -42,7 +42,6 @@ def get_product_stock(
 
     current_stock = result.scalar()
 
-    # Find base unit
     base_packaging = db.execute(
         select(ProductPackaging).where(
             ProductPackaging.product_id == product_id,

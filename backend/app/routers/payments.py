@@ -1,11 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from uuid import uuid4
+from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
+from app.models.customer import Customer
 from app.models.invoice import Invoice
+from app.models.order import Order
 from app.models.payment import Payment
 from app.schemas.payment import PaymentCreate
+from app.services.invoice_service import recalculate_invoice_status
 
 router = APIRouter(
     prefix="/payments",
@@ -13,7 +19,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("payments:write"))])
 def create_payment(
     data: PaymentCreate,
     db: Session = Depends(get_db)
@@ -29,7 +35,25 @@ def create_payment(
             status_code=404,
             detail="Invoice not found"
         )
+    if invoice.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Payments cannot be recorded against a cancelled invoice"
+        )
 
+    # Serialize concurrent payments against the same invoice so two
+    # simultaneous payments can't both pass the "remaining amount" check.
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": data.invoice_id}
+    )
+
+    db.refresh(invoice)
+    if invoice.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Payments cannot be recorded against a cancelled invoice"
+        )
     total_paid = db.execute(
         select(
             func.coalesce(
@@ -64,24 +88,19 @@ def create_payment(
         notes=data.notes
     )
 
-    db.add(payment)
-    db.flush()
+    try:
+        db.add(payment)
+        db.flush()
 
-    new_total_paid = (
-        float(total_paid)
-        + float(data.amount)
-    )
+        recalculate_invoice_status(db, invoice)
 
-    if new_total_paid == float(invoice.total_amount):
-        invoice.status = "PAID"
-
-    elif new_total_paid > 0:
-        invoice.status = "PARTIALLY_PAID"
-
-    else:
-        invoice.status = "UNPAID"
-
-    db.commit()
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Payment conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to record payment")
 
     return {
         "message": "Payment recorded successfully",
@@ -90,7 +109,125 @@ def create_payment(
         "paid_amount": payment.amount,
         "invoice_status": invoice.status
     }
-@router.get("/")
+@router.post("/apply-credit", dependencies=[Depends(require_permission("payments:write"))])
+def apply_customer_credit(
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Applies as much of the invoice's customer's existing credit_balance
+    (built up from over-covering returns, see returns.py ->
+    receive_return) as will fit against this invoice's remaining
+    balance. Creates a normal Payment row (payment_method:
+    CREDIT_APPLIED) so it's picked up by the same remaining/status
+    logic as any other payment, and decrements the customer's
+    credit_balance by the same amount -- this is the real wholesaler
+    equivalent of "the refund we owed you now pays for this order"
+    rather than a cash refund.
+    """
+    raw_invoice_id = data.get("invoice_id")
+
+    if not raw_invoice_id:
+        raise HTTPException(status_code=400, detail="invoice_id is required")
+
+    try:
+        # The frontend sends this as a plain JSON body (not a typed
+        # Pydantic schema), so it can arrive as a string -- bind it as
+        # an int explicitly, or Postgres rejects comparing bigint
+        # invoice_id columns against a VARCHAR parameter.
+        invoice_id = int(raw_invoice_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invoice_id must be a number")
+
+    invoice = db.get(Invoice, invoice_id)
+
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if invoice.status == "CANCELLED":
+        raise HTTPException(
+            status_code=400,
+            detail="Credit cannot be applied to a cancelled invoice"
+        )
+
+    order = db.get(Order, invoice.order_id)
+    # Lock the customer row so two applications for the same customer
+    # (even on different invoices) cannot spend the same credit twice.
+    # populate_existing makes sure we read the latest committed balance.
+    customer = (
+        db.execute(
+            select(Customer)
+            .where(Customer.customer_id == order.customer_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if order
+        else None
+    )
+
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer for this invoice not found")
+
+    # Same advisory lock as a normal payment -- a concurrent payment or
+    # another apply-credit call against this invoice/customer shouldn't
+    # be able to double-spend the same credit or overshoot remaining.
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": invoice_id}
+    )
+
+    total_paid = db.execute(
+        select(func.coalesce(func.sum(Payment.amount), 0))
+        .where(Payment.invoice_id == invoice_id)
+    ).scalar()
+
+    remaining = max(0.0, float(invoice.total_amount) - float(total_paid))
+    available_credit = float(customer.credit_balance)
+    amount_to_apply = min(remaining, available_credit)
+
+    if amount_to_apply <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Nothing to apply: "
+                f"invoice remaining is {remaining}, customer credit balance is {available_credit}"
+            )
+        )
+
+    payment = Payment(
+        invoice_id=invoice_id,
+        payment_date=invoice.invoice_date,
+        amount=amount_to_apply,
+        payment_method="CREDIT_APPLIED",
+        reference_number=f"CREDIT-{customer.customer_id}-{invoice_id}-{uuid4().hex[:8].upper()}",
+        notes=f"Applied from customer #{customer.customer_id}'s credit balance",
+    )
+
+    try:
+        db.add(payment)
+        customer.credit_balance = available_credit - amount_to_apply
+        db.flush()
+
+        recalculate_invoice_status(db, invoice)
+
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Applying credit conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to apply credit")
+
+    return {
+        "message": "Credit applied successfully",
+        "invoice_id": invoice_id,
+        "amount_applied": amount_to_apply,
+        "remaining_customer_credit": customer.credit_balance,
+        "invoice_status": invoice.status
+    }
+
+
+@router.get("/", dependencies=[Depends(require_permission("payments:read"))])
 def get_payments(
     db: Session = Depends(get_db)
 ):

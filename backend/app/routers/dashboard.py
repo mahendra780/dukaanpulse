@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, extract,case
 from sqlalchemy.orm import Session, aliased
 from datetime import date
+from app.core.permissions import require_permission
 from app.db.database import get_db
 
 from app.models.product import Product
@@ -24,12 +25,13 @@ router = APIRouter(
 
 @router.get(
     "/summary",
-    response_model=DashboardSummaryResponse
+    response_model=DashboardSummaryResponse,
+    dependencies=[Depends(require_permission("dashboard:read"))],
 )
 def get_dashboard_summary(
     db: Session = Depends(get_db)
 ):
-    # ---------- COUNT QUERIES ----------
+    
 
     total_products = db.scalar(
         select(func.count(Product.product_id))
@@ -47,7 +49,7 @@ def get_dashboard_summary(
         select(func.count(Order.order_id))
     )
 
-    # ---------- SUM QUERIES ----------
+
 
     total_sales = db.scalar(
         select(
@@ -64,7 +66,7 @@ def get_dashboard_summary(
                 func.sum(Purchase.total_amount),
                 0
             )
-        )
+        ).where(Purchase.status.in_(["RECEIVED", "PARTIALLY_RECEIVED"]))
     )
 
     current_inventory_items = db.scalar(
@@ -89,7 +91,7 @@ def get_dashboard_summary(
             current_inventory_items
         )
     )
-@router.get("/sales")
+@router.get("/sales", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_sales_dashboard(
     year: int = Query(..., description="Year (Example: 2026)"),
     db: Session = Depends(get_db)
@@ -136,7 +138,7 @@ def get_sales_dashboard(
     return result
 
 
-@router.get("/sales/daily")
+@router.get("/sales/daily", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_daily_sales(
     sales_date: date = Query(..., description="YYYY-MM-DD"),
     db: Session = Depends(get_db)
@@ -177,7 +179,7 @@ def get_daily_sales(
             for invoice in invoices
         ]
     }
-@router.get("/purchases")
+@router.get("/purchases", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_purchase_dashboard(
     year: int = Query(..., description="Year (Example: 2026)"),
     db: Session = Depends(get_db)
@@ -191,7 +193,8 @@ def get_purchase_dashboard(
             ).label("purchase")
         )
         .where(
-            extract("year", Purchase.purchase_date) == year
+            extract("year", Purchase.purchase_date) == year,
+            Purchase.status.in_(["RECEIVED", "PARTIALLY_RECEIVED"])
         )
         .group_by(
             extract("month", Purchase.purchase_date)
@@ -222,7 +225,7 @@ def get_purchase_dashboard(
         })
 
     return result
-@router.get("/top-products")
+@router.get("/top-products", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_top_products(
     limit: int = Query(10, ge=1, le=20),
     db: Session = Depends(get_db)
@@ -236,7 +239,7 @@ def get_top_products(
             Product.product_name,
             Product.brand_name,
 
-            # Quantity ko base unit me convert karo
+            
             func.coalesce(
                 func.sum(
                     InvoiceItem.quantity *
@@ -251,24 +254,23 @@ def get_top_products(
                 0
             ).label("sales_amount"),
 
-            # Base unit name (packet/piece/bottle)
+           
             base_packaging.unit_name.label("base_unit")
         )
 
-        # Product -> InvoiceItem
         .join(
             InvoiceItem,
             Product.product_id == InvoiceItem.product_id
         )
 
-        # Invoice me jis packaging me sale hui (carton/packet)
+       
         .join(
             sale_packaging,
             (InvoiceItem.packaging_id == sale_packaging.packaging_id)
             & (InvoiceItem.product_id == sale_packaging.product_id)
         )
 
-        # Usi product ki base packaging
+        
         .join(
             base_packaging,
             (Product.product_id == base_packaging.product_id)
@@ -304,7 +306,7 @@ def get_top_products(
         }
         for index, row in enumerate(products)
     ]
-@router.get("/low-stock")
+@router.get("/low-stock", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_low_stock_products(
     threshold: int = Query(
         100,
@@ -373,7 +375,7 @@ def get_low_stock_products(
         }
         for row in products
     ]
-@router.get("/payment-summary")
+@router.get("/payment-summary", dependencies=[Depends(require_permission("dashboard:read"))])
 def get_payment_summary(
     db: Session = Depends(get_db)
 ):
@@ -414,7 +416,28 @@ def get_payment_summary(
         )
     )
 
-    pending_amount = float(total_sales_amount) - float(total_paid_amount)
+    per_invoice_paid = dict(
+        db.execute(
+            select(Payment.invoice_id, func.coalesce(func.sum(Payment.amount), 0))
+            .group_by(Payment.invoice_id)
+        ).all()
+    )
+
+    invoice_totals = db.execute(
+        select(Invoice.invoice_id, Invoice.total_amount)
+        .where(Invoice.status != "CANCELLED")
+    ).all()
+
+    pending_amount = 0.0
+    refund_due_amount = 0.0
+
+    for invoice_id, total_amount in invoice_totals:
+        paid = float(per_invoice_paid.get(invoice_id, 0))
+        diff = float(total_amount) - paid
+        if diff > 0:
+            pending_amount += diff
+        else:
+            refund_due_amount += -diff
 
     return {
         "total_invoices": total_invoices,
@@ -424,5 +447,9 @@ def get_payment_summary(
 
         "total_sales_amount": float(total_sales_amount),
         "total_paid_amount": float(total_paid_amount),
-        "pending_amount": pending_amount
+        "pending_amount": pending_amount,
+        "refund_due_amount": refund_due_amount,
+        "total_customer_credit": float(
+            db.scalar(select(func.coalesce(func.sum(Customer.credit_balance), 0)))
+        )
     }

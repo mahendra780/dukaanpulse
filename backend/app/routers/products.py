@@ -1,11 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query,Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.models.category import Category
 from sqlalchemy import select, func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
+from app.models.packaging import ProductPackaging
 from app.models.product import Product
 from app.models.inventory import InventoryMovement
+from app.schemas.product import ProductCreate, ProductUpdate
 
 
 router = APIRouter(
@@ -14,7 +18,7 @@ router = APIRouter(
 )
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("products:read"))])
 def get_products(
     search: str | None = Query(
         default=None,
@@ -30,8 +34,6 @@ def get_products(
         )
         .order_by(Product.product_id)
     )
-
-    # Search filter
     if search:
         keyword = f"%{search.strip()}%"
         query = query.where(
@@ -47,7 +49,7 @@ def get_products(
     result = []
 
     for product in products:
-        # Current stock from inventory ledger
+
         current_stock = db.scalar(
             select(
                 func.coalesce(
@@ -95,7 +97,73 @@ def get_products(
         })
 
     return result
-@router.get("/{product_id}")
+
+
+@router.post("/", status_code=201, dependencies=[Depends(require_permission("products:write"))])
+def create_product(
+    data: ProductCreate,
+    db: Session = Depends(get_db)
+):
+    category = db.get(Category, data.category_id)
+    if not category:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Category {data.category_id} not found"
+        )
+
+    existing = db.execute(
+        select(Product).where(Product.sku == data.sku)
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="SKU already exists"
+        )
+
+    if sum(packaging.is_base_unit for packaging in data.packaging) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Exactly one packaging unit must be the base unit"
+        )
+
+    try:
+        product = Product(
+            product_name=data.product_name,
+            brand_name=data.brand_name,
+            sku=data.sku,
+            category_id=data.category_id,
+            status=data.status
+        )
+        db.add(product)
+        db.flush()
+
+        for packaging in data.packaging:
+            db.add(ProductPackaging(
+                product_id=product.product_id,
+                unit_name=packaging.unit_name,
+                conversion_to_base=packaging.conversion_to_base,
+                is_base_unit=packaging.is_base_unit,
+                is_purchase_unit=packaging.is_purchase_unit,
+                is_sale_unit=packaging.is_sale_unit
+            ))
+
+        db.commit()
+        db.refresh(product)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to create product"
+        )
+
+    return {
+        "message": "Product created successfully",
+        "product_id": product.product_id,
+        "product_name": product.product_name
+    }
+
+
+@router.get("/{product_id}", dependencies=[Depends(require_permission("products:read"))])
 def get_product(
     product_id: int,
     db: Session = Depends(get_db)
@@ -160,10 +228,10 @@ def get_product(
             for packaging in product.packaging
         ]
     }
-@router.patch("/{product_id}")
+@router.patch("/{product_id}", dependencies=[Depends(require_permission("products:write"))])
 def update_product(
     product_id: int,
-    data: dict = Body(...),
+    data: ProductUpdate,
     db: Session = Depends(get_db)
 ):
     product = db.get(Product, product_id)
@@ -174,7 +242,6 @@ def update_product(
             detail=f"Product {product_id} not found"
         )
 
-    # Allowed fields only
     allowed_fields = {
         "product_name",
         "brand_name",
@@ -183,11 +250,7 @@ def update_product(
         "status"
     }
 
-    update_data = {
-        key: value
-        for key, value in data.items()
-        if key in allowed_fields
-    }
+    update_data = data.model_dump(exclude_unset=True)
 
     if not update_data:
         raise HTTPException(
@@ -195,7 +258,7 @@ def update_product(
             detail="No valid fields provided for update"
         )
 
-    # Validate category
+
     if "category_id" in update_data:
         category = db.get(Category, update_data["category_id"])
         if not category:
@@ -204,7 +267,6 @@ def update_product(
                 detail=f"Category {update_data['category_id']} not found"
             )
 
-    # Validate duplicate SKU
     if "sku" in update_data:
         existing = db.execute(
             select(Product).where(
@@ -218,16 +280,12 @@ def update_product(
                 status_code=409,
                 detail="SKU already exists"
             )
-
-    # Validate status
     if "status" in update_data:
         if update_data["status"] not in ["ACTIVE", "INACTIVE"]:
             raise HTTPException(
                 status_code=400,
                 detail="Status must be ACTIVE or INACTIVE"
             )
-
-    # Update fields
     for field, value in update_data.items():
         setattr(product, field, value)
 

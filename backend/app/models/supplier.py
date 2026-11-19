@@ -1,16 +1,19 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text,func
+from sqlalchemy import BigInteger, DateTime, Identity, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Supplier(Base):
+class Supplier(WorkspaceScoped, Base):
     __tablename__ = "suppliers"
+    __table_args__ = (UniqueConstraint("workspace_id", "gst_number", name="uq_suppliers_workspace_gst"),)
 
     supplier_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -31,8 +34,7 @@ class Supplier(Base):
 
     gst_number: Mapped[str | None] = mapped_column(
         String(15),
-        nullable=True,
-        unique=True
+        nullable=True
     )
 
     payment_terms_days: Mapped[int] = mapped_column(

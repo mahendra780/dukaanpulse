@@ -1,16 +1,18 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, Numeric, String, Text,func
+from sqlalchemy import BigInteger, DateTime, Identity, Integer, Numeric, String, Text,func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Customer(Base):
+class Customer(WorkspaceScoped, Base):
     __tablename__ = "customers"
 
     customer_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -36,6 +38,12 @@ class Customer(Base):
 
     credit_limit: Mapped[float] = mapped_column(
         Numeric(12, 2),
+        nullable=False,
+        default=0
+    )
+
+    credit_balance: Mapped[float] = mapped_column(
+        Numeric(14, 2),
         nullable=False,
         default=0
     )

@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, or_
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session,joinedload
 
+from app.core.permissions import require_permission
 from app.db.database import get_db
 from app.models.customer import Customer
 from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
@@ -13,7 +15,7 @@ router = APIRouter(
 )
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission("customers:read"))])
 def get_customers(
     search: str | None = Query(
         default=None,
@@ -56,6 +58,7 @@ def get_customers(
             "address": customer.address,
             "area": customer.area,
             "credit_limit": float(customer.credit_limit),
+            "credit_balance": float(customer.credit_balance),
             "payment_terms_days": customer.payment_terms_days,
             "status": customer.status
         }
@@ -66,7 +69,8 @@ def get_customers(
 @router.post(
     "/",
     response_model=CustomerResponse,
-    status_code=201
+    status_code=201,
+    dependencies=[Depends(require_permission("customers:write"))],
 )
 def create_customer(
     data: CustomerCreate,
@@ -78,15 +82,23 @@ def create_customer(
         address=data.address,
         area=data.area,
         credit_limit=data.credit_limit,
-        payment_terms_days=data.payment_terms_days
+        payment_terms_days=data.payment_terms_days,
+        status=data.status,
     )
 
-    db.add(customer)
-    db.commit()
-    db.refresh(customer)
+    try:
+        db.add(customer)
+        db.commit()
+        db.refresh(customer)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Customer conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to create customer")
 
     return customer
-@router.get("/{customer_id}")
+@router.get("/{customer_id}", dependencies=[Depends(require_permission("customers:read"))])
 def get_customer(
     customer_id: int,
     db: Session = Depends(get_db)
@@ -112,6 +124,7 @@ def get_customer(
         "address": customer.address,
         "area": customer.area,
         "credit_limit": float(customer.credit_limit),
+        "credit_balance": float(customer.credit_balance),
         "payment_terms_days": customer.payment_terms_days,
         "status": customer.status,
         "orders": [
@@ -124,7 +137,7 @@ def get_customer(
             for order in customer.orders
         ]
     }
-@router.patch("/{customer_id}")
+@router.patch("/{customer_id}", dependencies=[Depends(require_permission("customers:write"))])
 def update_customer(
     customer_id: int,
     data: CustomerUpdate,
@@ -138,14 +151,20 @@ def update_customer(
             detail=f"Customer {customer_id} not found"
         )
 
-    # Only update fields sent by client
     update_data = data.model_dump(exclude_unset=True)
 
     for field, value in update_data.items():
         setattr(customer, field, value)
 
-    db.commit()
-    db.refresh(customer)
+    try:
+        db.commit()
+        db.refresh(customer)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Customer update conflicts with existing data")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Unable to update customer")
 
     return {
         "message": "Customer updated successfully",

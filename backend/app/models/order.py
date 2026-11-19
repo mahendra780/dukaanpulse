@@ -5,6 +5,8 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Identity,
     Numeric,
     String,
     Text,
@@ -13,13 +15,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.models.workspace_scope import WorkspaceScoped
 
 
-class Order(Base):
+class Order(WorkspaceScoped, Base):
     __tablename__ = "orders"
 
     order_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -67,11 +71,22 @@ class Order(Base):
     )
 
 
-class OrderItem(Base):
+class OrderItem(WorkspaceScoped, Base):
     __tablename__ = "order_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["packaging_id", "product_id"],
+            [
+                "product_packaging.packaging_id",
+                "product_packaging.product_id",
+            ],
+            name="fk_order_item_packaging",
+        ),
+    )
 
     order_item_id: Mapped[int] = mapped_column(
         BigInteger,
+        Identity(always=True),
         primary_key=True
     )
 
@@ -89,7 +104,6 @@ class OrderItem(Base):
 
     packaging_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product_packaging.packaging_id"),
         nullable=False
     )
 
@@ -105,10 +119,12 @@ class OrderItem(Base):
 
     product = relationship(
         "Product",
-        back_populates="order_items"
+        back_populates="order_items",
+        overlaps="order_items"
     )
 
     packaging = relationship(
         "ProductPackaging",
-        back_populates="order_items"
+        back_populates="order_items",
+        overlaps="order_items,product"
     )

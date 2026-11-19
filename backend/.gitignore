@@ -2,5 +2,9 @@ venv/
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
 .pytest_cache/
 .vscode/
+.AGENTS.md/
+.AI_CONTEXT.md/
